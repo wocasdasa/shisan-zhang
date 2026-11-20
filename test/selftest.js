@@ -122,6 +122,17 @@ ok('独食run 共12抽', out2.draws.length === 12);
 ok('独食run 每人恰好4', [0, 1, 3].every(function (s) { return perLoser[s] === 4; }));
 ok('独食run 交换后仍13', hands2.every(function (h) { return h.length === 13; }));
 
+// run()：独食第4 → 三家每人抽独食 4 张（逐家抽还交错），不缺额、不刷屏、lead 为独食者
+var hands4 = fullHands(2);
+var out4 = T.run(hands4, pl4, 11);
+var perWinner = {};
+out4.draws.forEach(function (d) { perWinner[d.to] = (perWinner[d.to] || 0) + 1; });
+ok('独食被抽run 共12抽', out4.draws.length === 12);
+ok('独食被抽run 每胜方恰好收4', [0, 1, 3].every(function (s) { return perWinner[s] === 4; }));
+ok('独食被抽run 交换后仍13', hands4.every(function (h) { return h.length === 13; }));
+ok('独食被抽run lead为独食者', out4.leadPlayer === 2);
+ok('独食被抽run reveal不刷屏', out4.reveal.length <= 12, 'reveal=' + out4.reveal.length);
+
 // ---- 名次计分 ----
 const Settle = require('../engine/settle.js');
 const t = (keys, ranks) => Settle.rankScores(ranks, teamCamp, 1).scores.join();

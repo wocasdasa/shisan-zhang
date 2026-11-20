@@ -74,6 +74,41 @@
           got++;
         }
       });
+    } else if (p.pairQuota && p.losers.length === 1) {
+      // 独食被抽方向（三家抽独食）：逐家抽还交错——当前胜方抽满 quota 张后立即
+      // 向独食者还贡 quota 张（还最低非身份牌），下一位胜方面对的仍是补满 13 张的牌池，
+      // 避免独食者恒持 2 张身份牌导致可抽上限 11 的静默缺额与 reveal 刷屏
+      var loneSeat = p.losers[0];
+      p.winners.forEach(function (w1) {
+        var got1 = 0, guard1 = 0;
+        var mine = [];
+        while (got1 < p.pairQuota && guard1++ < 200) {
+          var pool1 = hands[loneSeat];
+          if (!pool1.length) break;
+          var idx1 = Math.floor(rnd() * pool1.length);
+          var card1 = pool1[idx1];
+          if (isIdentity(card1)) {
+            reveals.push({ owner: loneSeat, card: card1, to: w1 });
+            continue;                   // 亮牌、归还（不动手牌），重抽、不占配额
+          }
+          pool1.splice(idx1, 1);
+          hands[w1].push(card1);
+          var d1 = { from: loneSeat, to: w1, card: card1 };
+          draws.push(d1);
+          mine.push(d1);
+          got1++;
+        }
+        // 立即还贡：记录在该笔 draw.returned 上，统一还贡阶段会跳过已还的
+        mine.forEach(function (d) {
+          var give1 = lowestCards(hands[d.to], 1, p.cfg || Rules.DEFAULT);
+          if (!give1.length) return;
+          var rc = give1[0];
+          var ri = hands[d.to].indexOf(rc);
+          if (ri >= 0) hands[d.to].splice(ri, 1);
+          hands[d.from].push(rc);
+          d.returned = rc;
+        });
+      });
     } else {
       var shares = distribute(p.count, p.winners.length);
       p.winners.forEach(function (w, wi) {
@@ -105,7 +140,9 @@
     }
 
     // 还贡：抽牌方自己决定还哪几张（还最低的非身份牌），还给对应被抽者
+    // （独食被抽方向已在交错阶段逐家还过，这里跳过）
     draws.forEach(function (d) {
+      if (d.returned) return;
       var give = lowestCards(hands[d.to], 1, p.cfg || Rules.DEFAULT);
       if (!give.length) return;
       var card = give[0];
