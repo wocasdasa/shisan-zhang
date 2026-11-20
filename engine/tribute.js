@@ -9,16 +9,27 @@
   function plan(lastResult, cfg) {
     if (!cfg.tributeEnabled) return { count: 0, skip: true };
     var ranks = lastResult.ranks, camp = lastResult.camp;
-    var firstTeamPlayers = (camp.mode === 'lone' && camp.lone === ranks[0])
-      ? [camp.lone] : camp.teamA.concat(camp.teamB).filter(function (p) { return takeTeam(camp, p) === takeTeam(camp, ranks[0]); });
-    // 胜方 = 与第 1 名同队的人
+    // 独食：按独食者名次定配额与抽牌方向
+    if (camp.mode === 'lone') {
+      var loneRank = ranks.indexOf(camp.lone) + 1;
+      var lq = Rules.tributeLoneQuota(loneRank, cfg.tributeTier);
+      var others = [0, 1, 2, 3].filter(function (p) { return p !== camp.lone; });
+      var loneWinners = lq.drawer === 'lone' ? [camp.lone] : others;
+      var loneLosers = lq.drawer === 'lone' ? others : [camp.lone];
+      return {
+        count: lq.quota * 3, pairQuota: lq.quota,
+        winners: loneWinners, losers: loneLosers,
+        winnerRanks: [loneRank], tier: cfg.tributeTier, cfg: cfg,
+        skip: false, loneRank: loneRank, drawer: lq.drawer
+      };
+    }
+    // 2v2：胜方 = 与第 1 名同队的人
     var winners = [0, 1, 2, 3].filter(function (p) { return takeTeam(camp, p) === takeTeam(camp, ranks[0]); });
     var losers = [0, 1, 2, 3].filter(function (p) { return takeTeam(camp, p) !== takeTeam(camp, ranks[0]); });
     var winnerRanks = winners.map(function (p) { return ranks.indexOf(p) + 1; }).sort();
     var count = Rules.tributeCount(winnerRanks, cfg.tributeTier);
-    void firstTeamPlayers;
     return {
-      count: count, winners: winners, losers: losers,
+      count: count, pairQuota: null, winners: winners, losers: losers,
       winnerRanks: winnerRanks, tier: cfg.tributeTier, cfg: cfg,
       skip: count === 0
     };
@@ -41,35 +52,57 @@
 
     var rnd = Cards.mulberry32((seed >>> 0) || 1);
     var draws = [], reveals = [];
-    var shares = distribute(p.count, p.winners.length);
     var ledCandidates = [];   // 用于"被抽最大牌的原主人先出"
 
-    p.winners.forEach(function (w, wi) {
-      var need = shares[wi];
-      for (var k = 0; k < need; k++) {
-        // 任选一名负方玩家（一人以上则随机挑）
-        var target = p.losers[Math.floor(rnd() * p.losers.length)];
-        if (p.losers.length === 1) target = p.losers[0];
-
-        var guard = 0;
-        var picked = null;
-        while (guard++ < 40) {
-          var pool = hands[target];
-          if (!pool.length) break;
-          var idx = Math.floor(rnd() * pool.length);
-          var card = pool[idx];
-          if (isIdentity(card)) {
-            reveals.push({ owner: target, card: card, to: w });
-            continue;                     // 亮牌、归还（不动手牌），重抽
+    // 独食抽牌方向（独食为唯一胜方）：每个败方恰好被抽 pairQuota 张
+    if (p.pairQuota && p.winners.length === 1) {
+      var w0 = p.winners[0];
+      p.losers.forEach(function (target) {
+        var got = 0, guard = 0;
+        while (got < p.pairQuota && guard++ < 200) {
+          var pool0 = hands[target];
+          if (!pool0.length) break;
+          var idx0 = Math.floor(rnd() * pool0.length);
+          var card0 = pool0[idx0];
+          if (isIdentity(card0)) {
+            reveals.push({ owner: target, card: card0, to: w0 });
+            continue;                   // 亮牌、归还（不动手牌），重抽、不占配额
           }
-          pool.splice(idx, 1);
-          hands[w].push(card);
-          picked = card;
-          break;
+          pool0.splice(idx0, 1);
+          hands[w0].push(card0);
+          draws.push({ from: target, to: w0, card: card0 });
+          got++;
         }
-        if (picked) draws.push({ from: target, to: w, card: picked });
-      }
-    });
+      });
+    } else {
+      var shares = distribute(p.count, p.winners.length);
+      p.winners.forEach(function (w, wi) {
+        var need = shares[wi];
+        for (var k = 0; k < need; k++) {
+          // 任选一名负方玩家（一人以上则随机挑）
+          var target = p.losers[Math.floor(rnd() * p.losers.length)];
+          if (p.losers.length === 1) target = p.losers[0];
+
+          var guard = 0;
+          var picked = null;
+          while (guard++ < 40) {
+            var pool = hands[target];
+            if (!pool.length) break;
+            var idx = Math.floor(rnd() * pool.length);
+            var card = pool[idx];
+            if (isIdentity(card)) {
+              reveals.push({ owner: target, card: card, to: w });
+              continue;                     // 亮牌、归还（不动手牌），重抽
+            }
+            pool.splice(idx, 1);
+            hands[w].push(card);
+            picked = card;
+            break;
+          }
+          if (picked) draws.push({ from: target, to: w, card: picked });
+        }
+      });
+    }
 
     // 还贡：抽牌方自己决定还哪几张（还最低的非身份牌），还给对应被抽者
     draws.forEach(function (d) {

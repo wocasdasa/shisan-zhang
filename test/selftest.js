@@ -2,6 +2,7 @@
 const C = require('../engine/cards.js');
 const R = require('../engine/rules.js');
 const H = require('../engine/hand.js');
+const T = require('../engine/tribute.js');
 
 let pass = 0, fail = 0;
 
@@ -73,6 +74,13 @@ ok('胜方 1&3 重贡 2', R.tributeCount([1, 3], 'heavy') === 2);
 ok('胜方 1&3 轻贡 1', R.tributeCount([1, 3], 'light') === 1);
 ok('胜方 1&4 不抽', R.tributeCount([1, 4], 'heavy') === 0);
 
+// —— 独食进贡（按独食者名次）——
+ok('独食第1 重贡 抽每人4', R.tributeLoneQuota(1, 'heavy').quota === 4 && R.tributeLoneQuota(1, 'heavy').drawer === 'lone');
+ok('独食第2 重贡 抽每人2', R.tributeLoneQuota(2, 'heavy').quota === 2 && R.tributeLoneQuota(2, 'heavy').drawer === 'lone');
+ok('独食第3 重贡 被抽2', R.tributeLoneQuota(3, 'heavy').quota === 2 && R.tributeLoneQuota(3, 'heavy').drawer === 'others');
+ok('独食第4 重贡 被抽4', R.tributeLoneQuota(4, 'heavy').quota === 4 && R.tributeLoneQuota(4, 'heavy').drawer === 'others');
+ok('独食轻贡减半', R.tributeLoneQuota(1, 'light').quota === 2 && R.tributeLoneQuota(4, 'light').quota === 2);
+
 // ---- 阵营 ----
 const Camp = require('../engine/camp.js');
 const handsFor = (s3At, sAAt) => {
@@ -85,6 +93,34 @@ const teamCamp = Camp.analyze(handsFor(0, 1));
 ok('不同人持 ♠3/♠A → 2v2', teamCamp.mode === 'team' && teamCamp.teamA.join() === '0,1');
 const loneCamp = Camp.analyze(handsFor(2, 2));
 ok('同一人持 → 独食', loneCamp.mode === 'lone' && loneCamp.lone === 2);
+
+// —— 独食 plan()/run() ——
+// loneCamp 已存在（lone=2）；构造 lastResult：ranks 为名次→座位数组
+var lr1 = { ranks: [2, 0, 1, 3], camp: loneCamp };   // 独食第1
+var pl1 = T.plan(lr1, R.DEFAULT);
+ok('独食第1 plan', pl1.pairQuota === 4 && pl1.count === 12 && pl1.winners.join() === '2' && pl1.losers.length === 3);
+var lr4 = { ranks: [0, 1, 3, 2], camp: loneCamp };   // 独食第4
+var pl4 = T.plan(lr4, R.DEFAULT);
+ok('独食第4 plan', pl4.pairQuota === 4 && pl4.count === 12 && pl4.winners.length === 3 && pl4.losers.join() === '2');
+
+// run()：独食第1 → 每个败方恰好被抽 4 张，交换后各家仍 13 张
+// 构造四家各 13 张的完整手牌，独食者（座位2）持 ♠3/♠A
+const fullHands = (lone) => {
+  const deck = C.makeDeck();
+  const h = [[], [], [], []];
+  h[lone].push({ s: 3, r: 3 }, { s: 3, r: 14 });
+  const rest = deck.filter(c => !(c.s === 3 && (c.r === 3 || c.r === 14)));
+  let p = 0;
+  rest.forEach(c => { while (h[p].length >= 13) p = (p + 1) % 4; h[p].push(c); });
+  return h;
+};
+var hands2 = fullHands(2);
+var out2 = T.run(hands2, pl1, 7);
+var perLoser = {};
+out2.draws.forEach(function (d) { perLoser[d.from] = (perLoser[d.from] || 0) + 1; });
+ok('独食run 共12抽', out2.draws.length === 12);
+ok('独食run 每人恰好4', [0, 1, 3].every(function (s) { return perLoser[s] === 4; }));
+ok('独食run 交换后仍13', hands2.every(function (h) { return h.length === 13; }));
 
 // ---- 名次计分 ----
 const Settle = require('../engine/settle.js');

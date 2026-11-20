@@ -92,18 +92,26 @@
     return out;
   }
 
-  // 进贡张数：按上局胜方名次组合
+  // 进贡张数：按上局胜方名次组合（2v2）
   function tributeCount(winnerRanks, tier) {
     var set = winnerRanks.slice().sort(function (a, b) { return a - b; }).join(',');
     if (set === '1,2') return tier === 'light' ? 2 : 4;
     if (set === '1,3') return tier === 'light' ? 1 : 2;
-    if (set === '1') return tier === 'light' ? 1 : 2;   // 独食胜：每家抽 1/2 张（三家共 3N）
     return 0;
+  }
+
+  // 独食进贡配额：按独食者名次
+  // 第1：独食抽其他三人 每人4/2；第2：独食抽其他三人 每人2/1；
+  // 第3：其他三人每人抽独食 2/1；第4：其他三人每人抽独食 4/2（重贡/轻贡）
+  function tributeLoneQuota(loneRank, tier) {
+    var heavy = loneRank === 1 ? 4 : loneRank === 2 ? 2 : loneRank === 3 ? 2 : 4;
+    var drawer = loneRank <= 2 ? 'lone' : 'others';
+    return { quota: tier === 'light' ? Math.ceil(heavy / 2) : heavy, drawer: drawer };
   }
 
   return {
     DEFAULT: DEFAULT, PRESETS: PRESETS, STRAIGHTS: STRAIGHTS,
     rankVal: rankVal, resolve: resolve, fromPreset: fromPreset,
-    tributeCount: tributeCount
+    tributeCount: tributeCount, tributeLoneQuota: tributeLoneQuota
   };
 });
