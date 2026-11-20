@@ -1,0 +1,39 @@
+{
+  "appid": "wx31c52de4c0526c31",
+  "projectname": "guangxi13",
+  "description": "广西十三张 · 纯积分休闲牌类小游戏，不涉及现金或实物奖励，无充值与兑换入口",
+  "compileType": "game",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "libVersion": "3.4.0",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "postcss": false,
+    "minified": false,
+    "urlCheck": false,
+    "compileWorklet": false,
+    "uglifyFileName": false,
+    "uploadWithSourceMap": true,
+    "packNpmManually": false,
+    "packNpmRelationList": [],
+    "minifyWXSS": true,
+    "minifyWXML": true,
+    "localPlugins": false,
+    "disableUseStrict": false,
+    "useCompilerPlugins": false,
+    "condition": false,
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    }
+  },
+  "condition": {},
+  "simulatorPluginLibVersion": {},
+  "packOptions": {
+    "ignore": [],
+    "include": []
+  },
+  "isGameTourist": false,
+  "editorSetting": {}
+}

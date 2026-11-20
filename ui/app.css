@@ -1,0 +1,534 @@
+:root {
+  --felt-hi: #14724d;
+  --felt-mid: #0a4a32;
+  --felt-lo: #052518;
+  --gold: #c9a961;
+  --gold-dim: rgba(201, 169, 97, 0.28);
+  --ivory: #f6f1e2;
+  --ink: #1b1712;
+  --red: #b02a2f;
+  --txt: #eae3d2;
+  --txt-dim: #9fb2a6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #04140d;
+  color: var(--txt);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(120% 90% at 50% 32%, var(--felt-hi) 0%, var(--felt-mid) 42%, var(--felt-lo) 100%);
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--gold-dim);
+  background: linear-gradient(180deg, rgba(4, 18, 12, 0.72), rgba(4, 18, 12, 0.28));
+  flex: 0 0 auto;
+  z-index: 3;
+}
+
+.brand {
+  font-family: "Noto Serif SC", serif;
+  font-size: 19px;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.brand small {
+  display: block;
+  font-family: "Noto Sans SC", sans-serif;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  color: var(--txt-dim);
+  margin-top: 2px;
+}
+
+.topbar .spacer { flex: 1; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--txt);
+  background: rgba(255, 255, 255, 0.03);
+  white-space: nowrap;
+}
+.chip.dim { color: var(--txt-dim); }
+
+select {
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--txt);
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+/* ---------- 牌桌 ---------- */
+.table {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.table::after {
+  content: "";
+  position: absolute;
+  inset: 18px 8% 26px;
+  border: 1px solid rgba(201, 169, 97, 0.2);
+  border-radius: 160px / 110px;
+  pointer-events: none;
+}
+
+.seat {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 2;
+}
+.seat.west { left: 5%; top: 50%; transform: translateY(-50%); }
+.seat.east { right: 5%; top: 50%; transform: translateY(-50%); flex-direction: row-reverse; }
+.seat.north { left: 50%; top: 26px; transform: translateX(-50%); }
+.seat.south { left: 50%; bottom: 18px; transform: translateX(-50%); }
+.seat.south .plate { min-width: 168px; }
+
+.seat .plate {
+  min-width: 124px;
+  padding: 9px 13px 10px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  background: rgba(3, 16, 11, 0.55);
+  text-align: center;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.seat-score {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.seat.active .plate {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-dim), 0 0 22px rgba(201, 169, 97, 0.22);
+}
+.seat.pickable .plate { cursor: pointer; border-color: rgba(214, 122, 92, 0.75); }
+.seat.pickable .plate:hover { background: rgba(214, 122, 92, 0.16); }
+.seat.out .plate { opacity: 0.45; }
+
+.seat-name {
+  font-family: "Noto Serif SC", serif;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+.card-count {
+  font-size: 11px;
+  color: var(--txt-dim);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.badges { margin-top: 5px; min-height: 16px; display: flex; gap: 4px; justify-content: center; }
+.badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+.badge.id { background: rgba(201, 169, 97, 0.18); color: var(--gold); border: 1px solid var(--gold-dim); }
+.badge.lone { background: rgba(176, 42, 47, 0.22); color: #e8b0ae; border: 1px solid rgba(176, 42, 47, 0.5); }
+
+.stack { display: flex; }
+.stack .card.back { margin-left: -30px; }
+.stack .card.back:first-child { margin-left: 0; }
+
+/* ---------- 中央出牌区 ---------- */
+.center {
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  width: min(920px, 76vw);
+  z-index: 1;
+}
+.center::before {
+  content: "♠";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -54%);
+  font-size: 132px;
+  color: rgba(201, 169, 97, 0.07);
+  pointer-events: none;
+  z-index: -1;
+}
+.center-label {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--txt-dim);
+  margin-bottom: 10px;
+  min-height: 16px;
+}
+.center-cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 10px 18px;
+  min-height: 92px;
+}
+
+.play-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px 5px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  opacity: 0.9;
+  transition: opacity 0.2s, border-color 0.2s, background 0.2s;
+}
+.play-group.top {
+  opacity: 1;
+  border-color: rgba(201, 169, 97, 0.55);
+  background: rgba(4, 26, 17, 0.42);
+  box-shadow: 0 0 0 1px rgba(201, 169, 97, 0.12);
+}
+.play-owner {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--txt-dim);
+}
+.play-group.top .play-owner { color: var(--gold); }
+.play-kind {
+  font-size: 10px;
+  color: var(--txt-dim);
+  letter-spacing: 0.06em;
+}
+.play-cards { display: flex; gap: 3px; }
+
+.timer {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--txt-dim);
+  min-width: 44px;
+  text-align: right;
+  margin-right: 6px;
+}
+.timer.urgent { color: #e8a5a3; }
+
+.center-cards.dense { gap: 6px 10px; }
+.center-cards.dense .play-group { padding: 4px 6px 3px; gap: 2px; }
+.center-cards.dense .play-owner { font-size: 10px; }
+.center-cards.dense .play-kind { font-size: 9px; }
+
+/* 身份牌（♠3 / ♠A）在桌上只给牌面加一圈记号，不做任何公告 */
+.id-mark { display: inline-flex; border-radius: 6px; box-shadow: 0 0 0 2px rgba(201, 169, 97, 0.85); }
+
+/* ---------- 扑克牌 ---------- */
+.card {
+  position: relative;
+  width: 64px;
+  height: 90px;
+  border-radius: 5px;
+  background: linear-gradient(170deg, #fdfaf0 0%, #f2ecdb 100%);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  flex: 0 0 auto;
+  user-select: none;
+  overflow: hidden;
+}
+.card .ct {
+  position: absolute;
+  top: 5px;
+  left: 7px;
+  font-family: "Noto Serif SC", serif;
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.card .cs {
+  position: absolute;
+  top: 30px;
+  left: 7px;
+  font-size: 17px;
+  line-height: 1;
+}
+.card .big {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 30px;
+  line-height: 1;
+  opacity: 0.16;
+}
+.card.red { color: var(--red); }
+.card.black { color: #23201a; }
+
+.card.mid { width: 56px; height: 78px; }
+.card.mid .ct { font-size: 19px; top: 4px; left: 5px; }
+.card.mid .cs { font-size: 15px; top: 26px; left: 5px; }
+.card.mid .big { font-size: 22px; right: 5px; bottom: 4px; }
+
+.card.small { width: 44px; height: 62px; }
+.card.small .ct { font-size: 15px; top: 3px; left: 4px; }
+.card.small .cs { font-size: 12px; top: 20px; left: 4px; }
+.card.small .big { font-size: 17px; right: 4px; bottom: 3px; }
+
+.card.tiny { width: 34px; height: 48px; }
+.card.tiny .ct { font-size: 12px; top: 2px; left: 3px; }
+.card.tiny .cs { font-size: 10px; top: 16px; left: 3px; }
+.card.tiny .big { font-size: 13px; right: 3px; bottom: 2px; box-shadow: none; }
+
+.card.mini { width: 34px; height: 48px; }
+.card.mini .ct { font-size: 13px; top: 2px; left: 4px; }
+.card.mini .cs { font-size: 10px; top: 17px; left: 4px; }
+.card.mini .big { display: none; }
+
+.card.back {
+  width: 38px;
+  height: 54px;
+  background:
+    repeating-linear-gradient(45deg, rgba(201, 169, 97, 0.22) 0 2px, transparent 2px 6px),
+    linear-gradient(160deg, #123c2b, #0a2419);
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* ---------- 底部手牌 ---------- */
+.dock {
+  flex: 0 0 auto;
+  padding: 10px 22px 18px;
+  border-top: 1px solid var(--gold-dim);
+  background: linear-gradient(0deg, rgba(3, 15, 10, 0.9), rgba(3, 15, 10, 0.42));
+  z-index: 3;
+}
+
+.hand-row { display: flex; align-items: flex-end; gap: 18px; }
+.hand {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 140px;
+  flex: 1 1 auto;
+  padding-top: 26px;
+}
+.hand-card { margin-left: -18px; transition: transform 0.14s ease; cursor: pointer; }
+.hand-card:first-child { margin-left: 0; }
+.hand-card:hover { transform: translateY(-10px); }
+.hand-card.sel { transform: translateY(-24px); }
+.hand-card.sel .card { box-shadow: 0 0 0 2px var(--gold), 0 10px 22px rgba(0, 0, 0, 0.45); }
+
+.side-info { text-align: right; min-width: 84px; padding-bottom: 14px; }
+.side-info .k { font-size: 11px; letter-spacing: 0.14em; color: var(--txt-dim); }
+.side-info .v { font-size: 16px; font-family: "Noto Serif SC", serif; color: var(--gold); white-space: nowrap; }
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--txt-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 22px;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  font-family: inherit;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 1px solid var(--gold-dim);
+  background: transparent;
+  color: var(--txt);
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--gold); background: rgba(201, 169, 97, 0.1); }
+.btn:disabled { opacity: 0.32; cursor: not-allowed; }
+.btn.primary { background: var(--gold); color: #241a08; border-color: var(--gold); font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: #dcc08a; }
+.btn.ghost { font-size: 12px; padding: 7px 14px; }
+
+/* ---------- 浮层 ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 10, 7, 0.72);
+  backdrop-filter: blur(3px);
+  z-index: 20;
+}
+.overlay.show { display: flex; }
+
+.panel {
+  width: min(760px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+  border: 1px solid var(--gold-dim);
+  border-radius: 6px;
+  background: linear-gradient(180deg, #0b2b1e, #06180f);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  padding: 22px 26px 20px;
+}
+
+.panel h2 {
+  margin: 0 0 4px;
+  font-family: "Noto Serif SC", serif;
+  font-size: 19px;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  font-weight: 600;
+}
+.panel .sub { font-size: 12px; color: var(--txt-dim); }
+.panel .stage { font-size: 13px; color: var(--txt); margin: 14px 0 8px; }
+.panel .info {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--txt-dim);
+  border-left: 2px solid var(--gold-dim);
+  padding-left: 10px;
+  line-height: 1.7;
+}
+
+.drawn { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0 4px; }
+.drawn .src { display: block; font-size: 10px; color: var(--txt-dim); text-align: center; margin-top: 4px; }
+.drawn .mini { line-height: 0; }
+
+.log {
+  margin-top: 12px;
+  max-height: 168px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.8;
+  border-top: 1px dashed var(--gold-dim);
+  padding-top: 8px;
+}
+.log-line { color: var(--txt-dim); }
+.log-line.draw { color: var(--txt); }
+.log-line.warn { color: #e8b0ae; }
+.log-line.ret { color: #a9c6a4; }
+
+table.settle {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 14px;
+  table-layout: fixed;
+  font-size: 13px;
+}
+table.settle col { width: 20%; }
+table.settle th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--txt-dim);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--gold-dim);
+}
+table.settle td { padding: 8px 0; border-bottom: 1px solid rgba(201, 169, 97, 0.1); }
+table.settle td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.num.pos { color: #8fc79a; }
+.num.neg { color: #de9a97; }
+
+.sum-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(201, 169, 97, 0.12);
+  font-size: 14px;
+}
+
+.panel-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+
+/* ---------- 进贡侧栏（不挡座位，便于点对方抽牌） ---------- */
+.side-panel {
+  position: fixed;
+  left: 20px;
+  bottom: 196px;
+  width: 300px;
+  max-height: 52vh;
+  overflow: auto;
+  display: none;
+  border: 1px solid var(--gold-dim);
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(9, 38, 25, 0.97), rgba(4, 20, 12, 0.97));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+  padding: 14px 16px 12px;
+  z-index: 12;
+}
+.side-panel.show { display: block; }
+.side-panel h3 {
+  margin: 0 0 8px;
+  font-family: "Noto Serif SC", serif;
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.muted { color: var(--txt-dim); font-size: 12px; }
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: 168px;
+  transform: translate(-50%, 8px);
+  padding: 9px 18px;
+  background: rgba(10, 30, 20, 0.92);
+  border: 1px solid var(--gold-dim);
+  border-radius: 3px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 30;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+@media (max-width: 980px) {
+  .brand small { display: none; }
+  .seat .plate { min-width: 88px; padding: 6px 8px; }
+  .seat-name { font-size: 12px; }
+  .card { width: 52px; height: 74px; }
+  .card .ct { font-size: 20px; }
+  .card .cs { font-size: 20px; }
+  .hand-card { margin-left: -30px; }
+  .chip.dim { display: none; }
+}

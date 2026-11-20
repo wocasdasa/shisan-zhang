@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>十三张·独食 — 牌桌原型</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%230a4a32'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23c9a961'%3E%E2%99%A0%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Sans+SC:wght@300;400;500;600&family=Noto+Serif+SC:wght@500;600;700&display=swap">
+<style>/*__CSS__*/</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">十三张 · 独食<small>单人牌桌 / 三家对手机器</small></div>
+  <div class="spacer"></div>
+  <div class="chip" id="roundInfo">第 1 / 8 局</div>
+  <div class="chip dim" id="ruleSummary">规则摘要</div>
+  <div class="chip dim">场次
+    <select id="roundSelect">
+      <option value="8" selected>8 局</option>
+      <option value="12">12 局</option>
+      <option value="16">16 局</option>
+      <option value="24">24 局</option>
+      <option value="32">32 局</option>
+    </select>
+  </div>
+  <div class="chip dim">进贡
+    <select id="tierSelect">
+      <option value="heavy" selected>重贡 4/2</option>
+      <option value="light">轻贡 2/1</option>
+    </select>
+  </div>
+  <div class="chip dim">对手
+    <select id="levelSelect">
+      <option value="0">新手</option>
+      <option value="1" selected>普通</option>
+      <option value="2">高手</option>
+    </select>
+  </div>
+  <button class="btn ghost" id="btnNewMatch">重新开局</button>
+</header>
+
+<div class="table">
+  <div class="seat west" id="seat-west">
+    <div class="stack"></div>
+    <div class="plate">
+      <div class="seat-name">西家</div>
+      <div class="card-count">—</div>
+      <div class="badges"></div>
+      <div class="seat-score">0</div>
+    </div>
+  </div>
+  <div class="seat north" id="seat-north">
+    <div class="stack"></div>
+    <div class="plate">
+      <div class="seat-name">北家</div>
+      <div class="card-count">—</div>
+      <div class="badges"></div>
+      <div class="seat-score">0</div>
+    </div>
+  </div>
+  <div class="seat east" id="seat-east">
+    <div class="stack"></div>
+    <div class="plate">
+      <div class="seat-name">东家</div>
+      <div class="card-count">—</div>
+      <div class="badges"></div>
+      <div class="seat-score">0</div>
+    </div>
+  </div>
+
+  <div class="seat south" id="seat-south">
+    <div class="plate">
+      <div class="seat-name">你</div>
+      <div class="card-count">—</div>
+      <div class="badges"></div>
+      <div class="seat-score">0</div>
+    </div>
+  </div>
+
+  <div class="center">
+    <div class="center-label" id="centerLabel"></div>
+    <div class="center-cards" id="centerCards"></div>
+  </div>
+</div>
+
+<div class="dock">
+  <div class="hand-row">
+    <div class="hand" id="hand"></div>
+    <div class="side-info">
+      <div class="k">手牌</div>
+      <div class="v" id="handTip">—</div>
+    </div>
+  </div>
+  <div class="actions">
+    <div class="hint" id="hint"></div>
+    <div class="timer" id="turnTimer"></div>
+    <button class="btn" id="btnHint">提示</button>
+    <button class="btn" id="btnPass">过牌</button>
+    <button class="btn primary" id="btnPlay">出牌</button>
+  </div>
+</div>
+
+<div class="side-panel" id="tributeWrap">
+  <h3 id="tributeTitle">进贡</h3>
+  <div class="info" id="tributeInfo"></div>
+  <div class="stage" id="tributeStage"></div>
+  <div class="drawn" id="drawnArea"></div>
+  <div class="log" id="tributeLog"></div>
+  <div class="panel-foot">
+    <button class="btn primary" id="btnTributeReturn">确认还贡</button>
+    <button class="btn" id="btnTributeSkip" style="display:none">跳过</button>
+  </div>
+</div>
+
+<div class="overlay" id="settleWrap">
+  <div class="panel">
+    <h2 id="settleTitle">本局结算</h2>
+    <div class="sub" id="settleSub"></div>
+    <table class="settle">
+      <colgroup><col><col><col><col><col></colgroup>
+      <thead><tr><th>名次</th><th>玩家</th><th>阵营</th><th style="text-align:right">本局</th><th style="text-align:right">累计</th></tr></thead>
+      <tbody id="settleBody"></tbody>
+    </table>
+    <div class="panel-foot">
+      <button class="btn primary" id="btnNext">下一局</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="summaryWrap">
+  <div class="panel">
+    <h2 id="summaryTitle">全场结束</h2>
+    <div class="sub" id="summarySub"></div>
+    <div id="summaryBody" style="margin-top:14px"></div>
+    <div class="panel-foot">
+      <button class="btn primary" id="btnCloseSummary">再开一场</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>/*__ENGINE__*/</script>
+<script>/*__APP__*/</script>
+</body>
+</html>
