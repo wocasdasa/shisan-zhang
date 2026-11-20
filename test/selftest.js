@@ -133,6 +133,11 @@ ok('独食被抽run 交换后仍13', hands4.every(function (h) { return h.length
 ok('独食被抽run lead为独食者', out4.leadPlayer === 2);
 ok('独食被抽run reveal不刷屏', out4.reveal.length <= 12, 'reveal=' + out4.reveal.length);
 
+// ---- 单机配额辅助：freeLosers 语义 ----
+ok('2v2 无配额原样返回', T.freeLosers({ losers: [0, 1], pairQuota: null }, {}).join() === '0,1');
+ok('配额未满可抽', T.freeLosers({ losers: [0, 1, 3], pairQuota: 4 }, { 0: 4, 1: 1 }).join() === '1,3');
+ok('全部抽满返回空', T.freeLosers({ losers: [0], pairQuota: 2 }, { 0: 2 }).length === 0);
+
 // ---- 名次计分 ----
 const Settle = require('../engine/settle.js');
 const t = (keys, ranks) => Settle.rankScores(ranks, teamCamp, 1).scores.join();

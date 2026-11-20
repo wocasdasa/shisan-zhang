@@ -584,7 +584,9 @@
           need: 0,
           stage: 'draw',
           humanIsWinner: plan.winners.indexOf(0) >= 0,
-          humanDrawn: []
+          humanDrawn: [],
+          pairQuota: plan.pairQuota || null,
+          drawnFrom: {}
         };
         S.tribute.need = S.tribute.humanIsWinner
           ? S.tribute.shares[plan.winners.indexOf(0)] : 0;
@@ -612,11 +614,15 @@
     }
     if (!T.humanIsWinner) return;
     if ((T.humanDrawn || []).length >= (T.need || 0)) return;
+    var lone = !!(T.pairQuota && T.plan && T.plan.winners && T.plan.winners.length === 1);
+    if (lone && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     T.stage = 'pull';
-    var lone = !!(T.plan && T.plan.winners && T.plan.winners.length === 1);
     var losersAll = lone ? ((T.plan && T.plan.losers) || [p]) : [p];
-    var rows = losersAll.map(function (r) { return { rel: r, n: S.game.players[r].hand.length }; });
-    T.pull = { rows: rows, done: 0, total: T.need * rows.length, count: T.need, roundStart: (T.draws || []).length };
+    var rows = losersAll.map(function (r) {
+      return { rel: r, n: S.game.players[r].hand.length, cap: T.pairQuota, got: T.drawnFrom[r] || 0 };
+    });
+    var perRow = lone ? T.pairQuota : T.need;
+    T.pull = { rows: rows, done: 0, total: perRow * rows.length, count: T.need, roundStart: (T.draws || []).length };
     S.hint = '点牌背抽一张';
     P.markDirty();
     return;
@@ -628,6 +634,7 @@
     if (!T || T.stage !== 'pull' || !T.pull) return;
     if (S.mode === 'online') { NET.send({ t: 'pullPick', seatRel: rel, idx: idx }); return; }
     var p = rel;
+    if (T.pairQuota && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     var hand = S.game.players[p].hand;
     if (!hand.length) return;
     var k = Math.max(0, Math.min(idx, hand.length - 1));
@@ -648,7 +655,8 @@
     T.humanDrawn.push({ from: p, card: c });
     T.log.push({ text: '从 ' + SEAT_NAMES[p] + ' 抽到 ' + suitRank(c), kind: 'draw' });
     T.pull.done++;
-    (T.pull.rows || []).forEach(function (r) { if (r.rel === p) r.n = hand.length; });
+    T.drawnFrom[p] = (T.drawnFrom[p] || 0) + 1;
+    (T.pull.rows || []).forEach(function (r) { if (r.rel === p) { r.n = hand.length; r.got = T.drawnFrom[p]; } });
     SFX.play('draw');
     S.fx.drawT0 = Date.now();
     if (T.pull.done >= (T.pull.total || T.need)) {
@@ -732,6 +740,15 @@
     SFX.play('ret');
     S.fx.retT0 = Date.now();
     if (T.retIdx >= (T.retQueue || []).length) {
+      T.humanRetDone = true;
+      // 独食被抽方向：真人抽满还贡后，后面还有 AI 胜方要抽，回到 draw 让调度继续
+      var interleave = !!(T.pairQuota && T.plan && T.plan.losers && T.plan.losers.length === 1);
+      if (interleave && aiJobPending(T)) {
+        T.stage = 'draw';
+        P.markDirty();
+        tributeSchedule(AUTO ? 60 : 700);
+        return;
+      }
       T.stage = 'done';
       finishTribute();
     } else {
@@ -753,9 +770,14 @@
   }
 
   function aiJobPending(T) {
+    // 独食被抽方向（三家抽独食）须逐家交错：当前胜方抽满并还贡后才推进下一位
+    var interleave = !!(T.pairQuota && T.plan && T.plan.losers && T.plan.losers.length === 1);
     for (var i = 0; i < T.plan.winners.length; i++) {
       var w = T.plan.winners[i];
-      if (w === 0 && T.humanIsWinner) continue;
+      if (w === 0 && T.humanIsWinner) {
+        if (interleave && !T.humanRetDone) return null;   // 等真人抽满还贡再推进
+        continue;
+      }
       if ((T.counts[i] || 0) < T.shares[i]) return { wi: i, w: w };
     }
     return null;
@@ -778,7 +800,18 @@
 
   function doTributeDraw(T, wi, w) {
     var plan = T.plan;
-    var target = plan.losers[Math.floor(Math.random() * plan.losers.length)];
+    var targets = GX.Tribute.freeLosers(plan, T.drawnFrom);
+    if (!targets.length) {
+      // 独食被抽方向（三家抽独食）：配额按每位胜方计，单个败方被三家
+      // 合计抽 pairQuota*winners.length 张，此时按该胜方自身 counts/shares 继续
+      if (plan.pairQuota && plan.losers.length === 1 && (T.counts[wi] || 0) < T.shares[wi]) {
+        targets = plan.losers.slice();
+      } else {
+        T.counts[wi] = T.shares[wi];   // 目标已全部抽满，视为该胜方完成
+        return;
+      }
+    }
+    var target = targets[Math.floor(Math.random() * targets.length)];
     var guard = 0;
     while (guard++ < 60) {
       var hand = S.game.players[target].hand;
@@ -797,6 +830,7 @@
       S.game.players[w].hand.push(card);
       T.draws.push({ from: target, to: w, card: card });
       T.counts[wi] = (T.counts[wi] || 0) + 1;
+      T.drawnFrom[target] = (T.drawnFrom[target] || 0) + 1;
       T.log.push({ text: SEAT_NAMES[w] + ' 从 ' + SEAT_NAMES[target] + ' 抽到 ' + suitRank(card), kind: 'draw' });
       if (w !== 0) aiReturnGift(T, w, target);
       return;
@@ -818,8 +852,8 @@
     // AI 抽完：真人赢家还要自己抽牌
     if (T.humanIsWinner && T.stage === 'draw' && T.humanDrawn.length < T.need) return;
     if (T.stage === 'draw') {
-      T.stage = T.humanIsWinner ? 'return' : 'done';
-      if (T.humanIsWinner) S.hint = '选 ' + T.need + ' 张还贡';
+      T.stage = (T.humanIsWinner && !T.humanRetDone) ? 'return' : 'done';
+      if (T.humanIsWinner && !T.humanRetDone) S.hint = '选 ' + T.need + ' 张还贡';
     }
     if (!T.humanIsWinner || T.stage === 'done') {
       // 抽完停顿一下，让人看清公示的牌

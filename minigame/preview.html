@@ -193,19 +193,27 @@ define("js/engine/rules.js", function (require, module, exports) {
     return out;
   }
 
-  // 进贡张数：按上局胜方名次组合
+  // 进贡张数：按上局胜方名次组合（2v2）
   function tributeCount(winnerRanks, tier) {
     var set = winnerRanks.slice().sort(function (a, b) { return a - b; }).join(',');
     if (set === '1,2') return tier === 'light' ? 2 : 4;
     if (set === '1,3') return tier === 'light' ? 1 : 2;
-    if (set === '1') return tier === 'light' ? 1 : 2;   // 独食胜：每家抽 1/2 张（三家共 3N）
     return 0;
+  }
+
+  // 独食进贡配额：按独食者名次
+  // 第1：独食抽其他三人 每人4/2；第2：独食抽其他三人 每人2/1；
+  // 第3：其他三人每人抽独食 2/1；第4：其他三人每人抽独食 4/2（重贡/轻贡）
+  function tributeLoneQuota(loneRank, tier) {
+    var heavy = loneRank === 1 ? 4 : loneRank === 2 ? 2 : loneRank === 3 ? 2 : 4;
+    var drawer = loneRank <= 2 ? 'lone' : 'others';
+    return { quota: tier === 'light' ? Math.ceil(heavy / 2) : heavy, drawer: drawer };
   }
 
   return {
     DEFAULT: DEFAULT, PRESETS: PRESETS, STRAIGHTS: STRAIGHTS,
     rankVal: rankVal, resolve: resolve, fromPreset: fromPreset,
-    tributeCount: tributeCount
+    tributeCount: tributeCount, tributeLoneQuota: tributeLoneQuota
   };
 });
 
@@ -1165,16 +1173,27 @@ define("js/engine/tribute.js", function (require, module, exports) {
   function plan(lastResult, cfg) {
     if (!cfg.tributeEnabled) return { count: 0, skip: true };
     var ranks = lastResult.ranks, camp = lastResult.camp;
-    var firstTeamPlayers = (camp.mode === 'lone' && camp.lone === ranks[0])
-      ? [camp.lone] : camp.teamA.concat(camp.teamB).filter(function (p) { return takeTeam(camp, p) === takeTeam(camp, ranks[0]); });
-    // 胜方 = 与第 1 名同队的人
+    // 独食：按独食者名次定配额与抽牌方向
+    if (camp.mode === 'lone') {
+      var loneRank = ranks.indexOf(camp.lone) + 1;
+      var lq = Rules.tributeLoneQuota(loneRank, cfg.tributeTier);
+      var others = [0, 1, 2, 3].filter(function (p) { return p !== camp.lone; });
+      var loneWinners = lq.drawer === 'lone' ? [camp.lone] : others;
+      var loneLosers = lq.drawer === 'lone' ? others : [camp.lone];
+      return {
+        count: lq.quota * 3, pairQuota: lq.quota,
+        winners: loneWinners, losers: loneLosers,
+        winnerRanks: [loneRank], tier: cfg.tributeTier, cfg: cfg,
+        skip: false, loneRank: loneRank, drawer: lq.drawer
+      };
+    }
+    // 2v2：胜方 = 与第 1 名同队的人
     var winners = [0, 1, 2, 3].filter(function (p) { return takeTeam(camp, p) === takeTeam(camp, ranks[0]); });
     var losers = [0, 1, 2, 3].filter(function (p) { return takeTeam(camp, p) !== takeTeam(camp, ranks[0]); });
     var winnerRanks = winners.map(function (p) { return ranks.indexOf(p) + 1; }).sort();
     var count = Rules.tributeCount(winnerRanks, cfg.tributeTier);
-    void firstTeamPlayers;
     return {
-      count: count, winners: winners, losers: losers,
+      count: count, pairQuota: null, winners: winners, losers: losers,
       winnerRanks: winnerRanks, tier: cfg.tributeTier, cfg: cfg,
       skip: count === 0
     };
@@ -1197,38 +1216,97 @@ define("js/engine/tribute.js", function (require, module, exports) {
 
     var rnd = Cards.mulberry32((seed >>> 0) || 1);
     var draws = [], reveals = [];
-    var shares = distribute(p.count, p.winners.length);
     var ledCandidates = [];   // 用于"被抽最大牌的原主人先出"
 
-    p.winners.forEach(function (w, wi) {
-      var need = shares[wi];
-      for (var k = 0; k < need; k++) {
-        // 任选一名负方玩家（一人以上则随机挑）
-        var target = p.losers[Math.floor(rnd() * p.losers.length)];
-        if (p.losers.length === 1) target = p.losers[0];
-
-        var guard = 0;
-        var picked = null;
-        while (guard++ < 40) {
-          var pool = hands[target];
-          if (!pool.length) break;
-          var idx = Math.floor(rnd() * pool.length);
-          var card = pool[idx];
-          if (isIdentity(card)) {
-            reveals.push({ owner: target, card: card, to: w });
-            continue;                     // 亮牌、归还（不动手牌），重抽
+    // 独食抽牌方向（独食为唯一胜方）：每个败方恰好被抽 pairQuota 张
+    if (p.pairQuota && p.winners.length === 1) {
+      var w0 = p.winners[0];
+      p.losers.forEach(function (target) {
+        var got = 0, guard = 0;
+        while (got < p.pairQuota && guard++ < 200) {
+          var pool0 = hands[target];
+          if (!pool0.length) break;
+          var idx0 = Math.floor(rnd() * pool0.length);
+          var card0 = pool0[idx0];
+          if (isIdentity(card0)) {
+            reveals.push({ owner: target, card: card0, to: w0 });
+            continue;                   // 亮牌、归还（不动手牌），重抽、不占配额
           }
-          pool.splice(idx, 1);
-          hands[w].push(card);
-          picked = card;
-          break;
+          pool0.splice(idx0, 1);
+          hands[w0].push(card0);
+          draws.push({ from: target, to: w0, card: card0 });
+          got++;
         }
-        if (picked) draws.push({ from: target, to: w, card: picked });
-      }
-    });
+      });
+    } else if (p.pairQuota && p.losers.length === 1) {
+      // 独食被抽方向（三家抽独食）：逐家抽还交错——当前胜方抽满 quota 张后立即
+      // 向独食者还贡 quota 张（还最低非身份牌），下一位胜方面对的仍是补满 13 张的牌池，
+      // 避免独食者恒持 2 张身份牌导致可抽上限 11 的静默缺额与 reveal 刷屏
+      var loneSeat = p.losers[0];
+      p.winners.forEach(function (w1) {
+        var got1 = 0, guard1 = 0;
+        var mine = [];
+        while (got1 < p.pairQuota && guard1++ < 200) {
+          var pool1 = hands[loneSeat];
+          if (!pool1.length) break;
+          var idx1 = Math.floor(rnd() * pool1.length);
+          var card1 = pool1[idx1];
+          if (isIdentity(card1)) {
+            reveals.push({ owner: loneSeat, card: card1, to: w1 });
+            continue;                   // 亮牌、归还（不动手牌），重抽、不占配额
+          }
+          pool1.splice(idx1, 1);
+          hands[w1].push(card1);
+          var d1 = { from: loneSeat, to: w1, card: card1 };
+          draws.push(d1);
+          mine.push(d1);
+          got1++;
+        }
+        // 立即还贡：记录在该笔 draw.returned 上，统一还贡阶段会跳过已还的
+        mine.forEach(function (d) {
+          var give1 = lowestCards(hands[d.to], 1, p.cfg || Rules.DEFAULT);
+          if (!give1.length) return;
+          var rc = give1[0];
+          var ri = hands[d.to].indexOf(rc);
+          if (ri >= 0) hands[d.to].splice(ri, 1);
+          hands[d.from].push(rc);
+          d.returned = rc;
+        });
+      });
+    } else {
+      var shares = distribute(p.count, p.winners.length);
+      p.winners.forEach(function (w, wi) {
+        var need = shares[wi];
+        for (var k = 0; k < need; k++) {
+          // 任选一名负方玩家（一人以上则随机挑）
+          var target = p.losers[Math.floor(rnd() * p.losers.length)];
+          if (p.losers.length === 1) target = p.losers[0];
+
+          var guard = 0;
+          var picked = null;
+          while (guard++ < 40) {
+            var pool = hands[target];
+            if (!pool.length) break;
+            var idx = Math.floor(rnd() * pool.length);
+            var card = pool[idx];
+            if (isIdentity(card)) {
+              reveals.push({ owner: target, card: card, to: w });
+              continue;                     // 亮牌、归还（不动手牌），重抽
+            }
+            pool.splice(idx, 1);
+            hands[w].push(card);
+            picked = card;
+            break;
+          }
+          if (picked) draws.push({ from: target, to: w, card: picked });
+        }
+      });
+    }
 
     // 还贡：抽牌方自己决定还哪几张（还最低的非身份牌），还给对应被抽者
+    // （独食被抽方向已在交错阶段逐家还过，这里跳过）
     draws.forEach(function (d) {
+      if (d.returned) return;
       var give = lowestCards(hands[d.to], 1, p.cfg || Rules.DEFAULT);
       if (!give.length) return;
       var card = give[0];
@@ -1261,7 +1339,15 @@ define("js/engine/tribute.js", function (require, module, exports) {
     return out;
   }
 
-  return { plan: plan, run: run, distribute: distribute, isIdentity: isIdentity };
+  // 单机配额辅助：pairQuota 为空（2v2）时 losers 原样返回；
+  // 否则只保留尚未被抽满 pairQuota 张的败方（drawnFrom 只计成功抽走的牌，身份牌亮还不计）
+  function freeLosers(planLike, drawnFrom) {
+    if (!planLike || planLike.pairQuota == null) return (planLike && planLike.losers) || [];
+    var d = drawnFrom || {};
+    return planLike.losers.filter(function (s) { return (d[s] || 0) < planLike.pairQuota; });
+  }
+
+  return { plan: plan, run: run, distribute: distribute, isIdentity: isIdentity, freeLosers: freeLosers };
 });
 
 });
@@ -3748,7 +3834,9 @@ define("js/app.js", function (require, module, exports) {
           need: 0,
           stage: 'draw',
           humanIsWinner: plan.winners.indexOf(0) >= 0,
-          humanDrawn: []
+          humanDrawn: [],
+          pairQuota: plan.pairQuota || null,
+          drawnFrom: {}
         };
         S.tribute.need = S.tribute.humanIsWinner
           ? S.tribute.shares[plan.winners.indexOf(0)] : 0;
@@ -3776,11 +3864,15 @@ define("js/app.js", function (require, module, exports) {
     }
     if (!T.humanIsWinner) return;
     if ((T.humanDrawn || []).length >= (T.need || 0)) return;
+    var lone = !!(T.pairQuota && T.plan && T.plan.winners && T.plan.winners.length === 1);
+    if (lone && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     T.stage = 'pull';
-    var lone = !!(T.plan && T.plan.winners && T.plan.winners.length === 1);
     var losersAll = lone ? ((T.plan && T.plan.losers) || [p]) : [p];
-    var rows = losersAll.map(function (r) { return { rel: r, n: S.game.players[r].hand.length }; });
-    T.pull = { rows: rows, done: 0, total: T.need * rows.length, count: T.need, roundStart: (T.draws || []).length };
+    var rows = losersAll.map(function (r) {
+      return { rel: r, n: S.game.players[r].hand.length, cap: T.pairQuota, got: T.drawnFrom[r] || 0 };
+    });
+    var perRow = lone ? T.pairQuota : T.need;
+    T.pull = { rows: rows, done: 0, total: perRow * rows.length, count: T.need, roundStart: (T.draws || []).length };
     S.hint = '点牌背抽一张';
     P.markDirty();
     return;
@@ -3792,6 +3884,7 @@ define("js/app.js", function (require, module, exports) {
     if (!T || T.stage !== 'pull' || !T.pull) return;
     if (S.mode === 'online') { NET.send({ t: 'pullPick', seatRel: rel, idx: idx }); return; }
     var p = rel;
+    if (T.pairQuota && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     var hand = S.game.players[p].hand;
     if (!hand.length) return;
     var k = Math.max(0, Math.min(idx, hand.length - 1));
@@ -3812,7 +3905,8 @@ define("js/app.js", function (require, module, exports) {
     T.humanDrawn.push({ from: p, card: c });
     T.log.push({ text: '从 ' + SEAT_NAMES[p] + ' 抽到 ' + suitRank(c), kind: 'draw' });
     T.pull.done++;
-    (T.pull.rows || []).forEach(function (r) { if (r.rel === p) r.n = hand.length; });
+    T.drawnFrom[p] = (T.drawnFrom[p] || 0) + 1;
+    (T.pull.rows || []).forEach(function (r) { if (r.rel === p) { r.n = hand.length; r.got = T.drawnFrom[p]; } });
     SFX.play('draw');
     S.fx.drawT0 = Date.now();
     if (T.pull.done >= (T.pull.total || T.need)) {
@@ -3896,6 +3990,15 @@ define("js/app.js", function (require, module, exports) {
     SFX.play('ret');
     S.fx.retT0 = Date.now();
     if (T.retIdx >= (T.retQueue || []).length) {
+      T.humanRetDone = true;
+      // 独食被抽方向：真人抽满还贡后，后面还有 AI 胜方要抽，回到 draw 让调度继续
+      var interleave = !!(T.pairQuota && T.plan && T.plan.losers && T.plan.losers.length === 1);
+      if (interleave && aiJobPending(T)) {
+        T.stage = 'draw';
+        P.markDirty();
+        tributeSchedule(AUTO ? 60 : 700);
+        return;
+      }
       T.stage = 'done';
       finishTribute();
     } else {
@@ -3917,9 +4020,14 @@ define("js/app.js", function (require, module, exports) {
   }
 
   function aiJobPending(T) {
+    // 独食被抽方向（三家抽独食）须逐家交错：当前胜方抽满并还贡后才推进下一位
+    var interleave = !!(T.pairQuota && T.plan && T.plan.losers && T.plan.losers.length === 1);
     for (var i = 0; i < T.plan.winners.length; i++) {
       var w = T.plan.winners[i];
-      if (w === 0 && T.humanIsWinner) continue;
+      if (w === 0 && T.humanIsWinner) {
+        if (interleave && !T.humanRetDone) return null;   // 等真人抽满还贡再推进
+        continue;
+      }
       if ((T.counts[i] || 0) < T.shares[i]) return { wi: i, w: w };
     }
     return null;
@@ -3942,7 +4050,18 @@ define("js/app.js", function (require, module, exports) {
 
   function doTributeDraw(T, wi, w) {
     var plan = T.plan;
-    var target = plan.losers[Math.floor(Math.random() * plan.losers.length)];
+    var targets = GX.Tribute.freeLosers(plan, T.drawnFrom);
+    if (!targets.length) {
+      // 独食被抽方向（三家抽独食）：配额按每位胜方计，单个败方被三家
+      // 合计抽 pairQuota*winners.length 张，此时按该胜方自身 counts/shares 继续
+      if (plan.pairQuota && plan.losers.length === 1 && (T.counts[wi] || 0) < T.shares[wi]) {
+        targets = plan.losers.slice();
+      } else {
+        T.counts[wi] = T.shares[wi];   // 目标已全部抽满，视为该胜方完成
+        return;
+      }
+    }
+    var target = targets[Math.floor(Math.random() * targets.length)];
     var guard = 0;
     while (guard++ < 60) {
       var hand = S.game.players[target].hand;
@@ -3961,6 +4080,7 @@ define("js/app.js", function (require, module, exports) {
       S.game.players[w].hand.push(card);
       T.draws.push({ from: target, to: w, card: card });
       T.counts[wi] = (T.counts[wi] || 0) + 1;
+      T.drawnFrom[target] = (T.drawnFrom[target] || 0) + 1;
       T.log.push({ text: SEAT_NAMES[w] + ' 从 ' + SEAT_NAMES[target] + ' 抽到 ' + suitRank(card), kind: 'draw' });
       if (w !== 0) aiReturnGift(T, w, target);
       return;
@@ -3982,8 +4102,8 @@ define("js/app.js", function (require, module, exports) {
     // AI 抽完：真人赢家还要自己抽牌
     if (T.humanIsWinner && T.stage === 'draw' && T.humanDrawn.length < T.need) return;
     if (T.stage === 'draw') {
-      T.stage = T.humanIsWinner ? 'return' : 'done';
-      if (T.humanIsWinner) S.hint = '选 ' + T.need + ' 张还贡';
+      T.stage = (T.humanIsWinner && !T.humanRetDone) ? 'return' : 'done';
+      if (T.humanIsWinner && !T.humanRetDone) S.hint = '选 ' + T.need + ' 张还贡';
     }
     if (!T.humanIsWinner || T.stage === 'done') {
       // 抽完停顿一下，让人看清公示的牌

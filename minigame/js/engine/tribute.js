@@ -175,5 +175,13 @@
     return out;
   }
 
-  return { plan: plan, run: run, distribute: distribute, isIdentity: isIdentity };
+  // 单机配额辅助：pairQuota 为空（2v2）时 losers 原样返回；
+  // 否则只保留尚未被抽满 pairQuota 张的败方（drawnFrom 只计成功抽走的牌，身份牌亮还不计）
+  function freeLosers(planLike, drawnFrom) {
+    if (!planLike || planLike.pairQuota == null) return (planLike && planLike.losers) || [];
+    var d = drawnFrom || {};
+    return planLike.losers.filter(function (s) { return (d[s] || 0) < planLike.pairQuota; });
+  }
+
+  return { plan: plan, run: run, distribute: distribute, isIdentity: isIdentity, freeLosers: freeLosers };
 });
