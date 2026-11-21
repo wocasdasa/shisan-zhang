@@ -1976,30 +1976,26 @@ define("js/views.js", function (require, module, exports) {
       };
     }
     var headerH = 96;
-    var handH = 322;
-    var tableTop = headerH;
-    var tableBottom = H - handH;
-    var seatW = 168, seatH = 88;
-    var rowY = tableTop + 8;
-    var midY = rowY + seatH + 26;
+    var seatW = 176, seatH = 64;
+    var rowY = headerH + 8;
+    var handY = H - 268;
     return {
       H: H,
       headerH: headerH,
       landscape: false,
-      table: { top: tableTop, bottom: tableBottom },
+      table: { top: headerH, bottom: handY - 96 },
       seats: {
         north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
         east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
-        south: { x: W / 2 - seatW / 2, y: tableBottom - 108, w: seatW, h: seatH }
+        south: { x: 24, y: handY - 84, w: seatW, h: seatH }
       },
-      center: { y: midY + (tableBottom - 108 - midY) * 0.58 },
+      center: { y: Math.round(H * 0.40) },
       hand: {
-        y: H - 268,
-        cardW: 94,
-        cardH: 132,
-        step: 51,
-        x0: 28
+        y: handY,
+        cardW: 64,
+        cardH: 90,
+        step: 52
       },
       actions: { y: H - 112, h: 74 }
     };
@@ -2064,7 +2060,7 @@ define("js/views.js", function (require, module, exports) {
     var barTop0 = handY0 - 52;
     var inner = landscape
       ? { x: pad, y: 64, w: W - pad * 2, h: Math.max(110, barTop0 - 64 - 6) }
-      : { x: 48, y: 150, w: W - 96, h: H - 440 };
+      : { x: 48, y: 150, w: W - 96, h: H - 514 };
     box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
 
     // 水印（放两侧留白，避免压住出牌区）
@@ -2309,44 +2305,44 @@ define("js/views.js", function (require, module, exports) {
       24, 74, 15, online ? C.gold : C.dim, 'left', 400);
     hits.push({ x: 16, y: 54, w: 240, h: 36, act: 'mode' });
 
-    var y = 24, h = 50, gap = 8;
+    var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = W - 24;
     // 重开
     x -= 78;
-    box(ctx, x, y, 78, h, 8, C.btn, C.panelLine);
-    txt(ctx, '重开', x + 39, y + h / 2, 16, C.text);
+    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+    txt(ctx, '重开', x + 39, y + h / 2, fs, C.text);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'newMatch' });
 
     // 对手强度
     x -= gap + 86;
-    box(ctx, x, y, 86, h, 8, C.btn, C.panelLine);
-    txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, 16, C.text);
+    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+    txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, fs, C.text);
     hits.push({ x: x, y: y, w: 86, h: h, act: 'level' });
 
     // 进贡档位
     x -= gap + 86;
-    box(ctx, x, y, 86, h, 8, C.btn, C.panelLine);
-    txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, 16, C.text);
+    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+    txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, fs, C.text);
     hits.push({ x: x, y: y, w: 86, h: h, act: 'tier' });
 
     // 场次
     x -= gap + 78;
-    box(ctx, x, y, 78, h, 8, C.btn, C.panelLine);
-    txt(ctx, S.rounds + '局', x + 39, y + h / 2, 16, C.text);
+    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+    txt(ctx, S.rounds + '局', x + 39, y + h / 2, fs, C.text);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'round' });
 
     // 音效开关
     x -= gap + 78;
     var on = S.audioOn !== false;
-    box(ctx, x, y, 78, h, 8, on ? C.btn : 'rgba(16,28,46,0.55)',
+    box(ctx, x, y, 78, h, rad, on ? C.btn : 'rgba(16,28,46,0.55)',
       on ? C.panelLine : 'rgba(216,179,106,0.12)');
-    txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, 16, on ? C.text : C.dim);
+    txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, fs, on ? C.text : C.dim);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'audio' });
 
     // 进贡流程测试入口
     x -= gap + 78;
-    box(ctx, x, y, 78, h, 8, 'rgba(216,179,106,0.16)', C.goldDim);
-    txt(ctx, '测进贡', x + 39, y + h / 2, 15, C.gold);
+    box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
+    txt(ctx, '测进贡', x + 39, y + h / 2, fs, C.gold);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'testTribute' });
   }
 
@@ -2679,10 +2675,12 @@ define("js/views.js", function (require, module, exports) {
     var mine = g ? g.players[0].hand : [];
     var ds = dealState(S);
     var n = ds && !ds.done ? Math.min(mine.length, ds.arrived[0]) : mine.length;
-    var avail = W - 320 - L.hand.cardW;
+    // 横屏为左下南家座位牌预留 150px；竖屏南家已移至手牌区左上，手牌整行居中
+    var reserve = L.landscape ? 320 : 48;
+    var avail = W - reserve - L.hand.cardW;
     var step = n > 1 ? Math.min(L.hand.step, Math.max(26, avail / (n - 1))) : L.hand.step;
     var totalW = (n - 1) * step + L.hand.cardW;
-    var hx = Math.max(150, Math.round((W - totalW) / 2));
+    var hx = Math.max(L.landscape ? 150 : 24, Math.round((W - totalW) / 2));
 
     mine.slice(0, n).forEach(function (c, i) {
       var sel = S.selected.some(function (s) { return s.r === c.r && s.s === c.s; });
