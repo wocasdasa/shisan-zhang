@@ -2,20 +2,20 @@
 (function () {
   var W = 750;
   var C = {
-    bg0: '#081d14',
-    bg1: '#143f2c',
-    felt: '#14432f',
-    gold: '#c9a961',
-    goldDim: 'rgba(201,169,97,0.5)',
-    text: '#efeadb',
-    dim: '#9db1a4',
+    bg0: '#0a121f',
+    bg1: '#16273f',
+    felt: '#1a2f4d',
+    gold: '#d8b36a',
+    goldDim: 'rgba(216,179,106,0.5)',
+    text: '#f2ead8',
+    dim: '#93a3ba',
     paper: '#fdfaf0',
     paper2: '#efe7d3',
-    red: '#b03a3f',
+    red: '#c8452c',
     ink: '#1d2620',
-    panel: '#0e2a1f',
-    panelLine: 'rgba(201,169,97,0.28)',
-    btn: '#1b3a2b',
+    panel: '#0f1b2e',
+    panelLine: 'rgba(216,179,106,0.28)',
+    btn: '#1c2f4a',
     danger: '#c0504d'
   };
 
@@ -145,7 +145,7 @@
     var inner = landscape
       ? { x: pad, y: 64, w: W - pad * 2, h: Math.max(110, barTop0 - 64 - 6) }
       : { x: 48, y: 150, w: W - 96, h: H - 440 };
-    box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(201,169,97,0.16)');
+    box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
 
     // 水印（放两侧留白，避免压住出牌区）
     ctx.save();
@@ -183,7 +183,7 @@
       ctx.stroke();
     }
     if (opt.dim) {
-      ctx.fillStyle = 'rgba(10,25,18,0.35)';
+      ctx.fillStyle = 'rgba(10,20,34,0.35)';
       rr(ctx, x, y, w, h, Math.max(4, w * 0.08));
       ctx.fill();
     }
@@ -192,11 +192,11 @@
 
   function drawBack(ctx, x, y, w, h) {
     var r = Math.max(4, w * 0.08);
-    box(ctx, x, y, w, h, r, '#123a29', 'rgba(201,169,97,0.35)');
+    box(ctx, x, y, w, h, r, '#172943', 'rgba(216,179,106,0.35)');
     ctx.save();
     rr(ctx, x, y, w, h, r);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(201,169,97,0.28)';
+    ctx.strokeStyle = 'rgba(216,179,106,0.28)';
     ctx.lineWidth = 1;
     var step = Math.max(6, w / 9);
     for (var i = -h; i < w; i += step) {
@@ -418,14 +418,14 @@
     // 音效开关
     x -= gap + 78;
     var on = S.audioOn !== false;
-    box(ctx, x, y, 78, h, 8, on ? C.btn : 'rgba(20,40,30,0.55)',
-      on ? C.panelLine : 'rgba(201,169,97,0.12)');
+    box(ctx, x, y, 78, h, 8, on ? C.btn : 'rgba(16,28,46,0.55)',
+      on ? C.panelLine : 'rgba(216,179,106,0.12)');
     txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, 16, on ? C.text : C.dim);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'audio' });
 
     // 进贡流程测试入口
     x -= gap + 78;
-    box(ctx, x, y, 78, h, 8, 'rgba(201,169,97,0.16)', C.goldDim);
+    box(ctx, x, y, 78, h, 8, 'rgba(216,179,106,0.16)', C.goldDim);
     txt(ctx, '测进贡', x + 39, y + h / 2, 15, C.gold);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'testTribute' });
   }
@@ -443,14 +443,14 @@
     var compact = rect.w <= 130;
     var ar = Math.max(16, Math.min(25, Math.round(rect.h / 2.2)));
     var ax = rect.x + 10 + ar, ay = rect.y + rect.h / 2;
-    box(ctx, rect.x, rect.y, rect.w, rect.h, 12, 'rgba(6,26,18,0.55)',
-      active ? C.gold : 'rgba(201,169,97,0.22)');
+    box(ctx, rect.x, rect.y, rect.w, rect.h, 12, 'rgba(10,20,34,0.55)',
+      active ? C.gold : 'rgba(216,179,106,0.22)');
     ctx.save();
     ctx.beginPath();
     ctx.arc(ax, ay, ar, 0, Math.PI * 2);
-    ctx.fillStyle = active ? 'rgba(201,169,97,0.28)' : 'rgba(201,169,97,0.12)';
+    ctx.fillStyle = active ? 'rgba(216,179,106,0.28)' : 'rgba(216,179,106,0.12)';
     ctx.fill();
-    ctx.strokeStyle = active ? C.gold : 'rgba(201,169,97,0.35)';
+    ctx.strokeStyle = active ? C.gold : 'rgba(216,179,106,0.35)';
     ctx.lineWidth = active ? 2 : 1;
     ctx.stroke();
     ctx.restore();
@@ -473,7 +473,7 @@
 
     if (active) {
       ctx.save();
-      ctx.shadowColor = 'rgba(201,169,97,0.45)';
+      ctx.shadowColor = 'rgba(216,179,106,0.45)';
       ctx.shadowBlur = 14;
       rr(ctx, rect.x, rect.y, rect.w, rect.h, 10);
       ctx.strokeStyle = C.goldDim;
@@ -491,7 +491,7 @@
     var my = (p === 0) ? rect.y - 24 : rect.y + rect.h + 4;
     var bx = rect.x + rect.w / 2 - mw / 2 + 20;
     rc.forEach(function (r) {
-      box(ctx, bx - 19, my, 38, 20, 5, 'rgba(201,169,97,0.16)', C.goldDim);
+      box(ctx, bx - 19, my, 38, 20, 5, 'rgba(216,179,106,0.16)', C.goldDim);
       txt(ctx, r === 3 ? '♠3' : '♠A', bx, my + 11, 12, C.gold, 'center');
       bx += 42;
     });
@@ -680,7 +680,7 @@
     }
 
     ctx.save();
-    ctx.fillStyle = 'rgba(4,26,17,0.30)';
+    ctx.fillStyle = 'rgba(8,16,28,0.30)';
     rr(ctx, x0 - 16, yTop - 34, blockW + 32, ch + 52, 10);
     ctx.fill();
     ctx.restore();
@@ -701,7 +701,7 @@
       hist.forEach(function (pl) {
         var bw = pl.cards.length * (hw + hgap);
         if (hx + bw > maxX) return;
-        box(ctx, hx - 4, hy - 4, bw + 8, hh + 8, 5, 'rgba(4,26,17,0.35)', 'rgba(201,169,97,0.22)');
+        box(ctx, hx - 4, hy - 4, bw + 8, hh + 8, 5, 'rgba(8,16,28,0.35)', 'rgba(216,179,106,0.22)');
         pl.cards.forEach(function (c, i) {
           var mark = c.s === 3 && (c.r === 3 || c.r === 14);
           drawCard(ctx, hx + i * (hw + hgap), hy, hw, hh, c, { mark: mark });
@@ -807,8 +807,8 @@
 
   function pill(ctx, x, y, w, h, label, enabled, hits, act, tone) {
     var r = h / 2;
-    var fill = !enabled ? 'rgba(26,42,34,0.55)' : tone === 'blue' ? '#3b86d8' : '#e9b84d';
-    var line = !enabled ? 'rgba(201,169,97,0.14)' : tone === 'blue' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.5)';
+    var fill = !enabled ? 'rgba(16,28,46,0.55)' : tone === 'blue' ? '#3b86d8' : '#e9b84d';
+    var line = !enabled ? 'rgba(216,179,106,0.14)' : tone === 'blue' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.5)';
     box(ctx, x, y, w, h, r, fill, line);
     if (enabled) {
       ctx.save();
@@ -822,7 +822,7 @@
       ctx.restore();
     }
     txt(ctx, label, x + w / 2, y + h / 2 + 1, 18,
-      enabled ? (tone === 'blue' ? '#ffffff' : '#4a2f08') : 'rgba(239,234,219,0.4)', 'center', 600);
+      enabled ? (tone === 'blue' ? '#ffffff' : '#4a2f08') : 'rgba(242,234,216,0.4)', 'center', 600);
     if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
   }
 
@@ -853,11 +853,11 @@
   function btn(ctx, x, y, w, h, label, enabled, hits, act, primary) {
     if (primary && enabled) {
       box(ctx, x, y, w, h, 10, C.gold, null);
-      txt(ctx, label, x + w / 2, y + h / 2, 21, '#132018', 'center', 600);
+      txt(ctx, label, x + w / 2, y + h / 2, 21, '#101f33', 'center', 600);
     } else {
-      box(ctx, x, y, w, h, 10, enabled ? C.btn : 'rgba(20,40,30,0.6)',
-        enabled ? C.panelLine : 'rgba(201,169,97,0.12)');
-      txt(ctx, label, x + w / 2, y + h / 2, 21, enabled ? C.text : 'rgba(239,234,219,0.35)');
+      box(ctx, x, y, w, h, 10, enabled ? C.btn : 'rgba(16,28,46,0.6)',
+        enabled ? C.panelLine : 'rgba(216,179,106,0.12)');
+      txt(ctx, label, x + w / 2, y + h / 2, 21, enabled ? C.text : 'rgba(242,234,216,0.35)');
     }
     if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
   }
@@ -883,7 +883,7 @@
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.45)';
     ctx.shadowBlur = 14;
-    box(ctx, barX, barY, barW, barH, 14, 'rgba(8,30,22,0.96)', 'rgba(201,169,97,0.4)');
+    box(ctx, barX, barY, barW, barH, 14, 'rgba(10,20,34,0.96)', 'rgba(216,179,106,0.4)');
     ctx.restore();
 
     var cnt = (T.pull && (T.pull.total || T.pull.count)) || T.need || (T.plan && T.plan.count) || 0;
@@ -913,8 +913,8 @@
         gd2.addColorStop(0.55, '#e9b84d');
         gd2.addColorStop(1, '#cf9a2f');
       } else {
-        gd2.addColorStop(0, '#9fb3a8');
-        gd2.addColorStop(1, '#7d9188');
+        gd2.addColorStop(0, '#9fb0c4');
+        gd2.addColorStop(1, '#7e8ea3');
       }
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,0.28)';
@@ -922,7 +922,7 @@
       box(ctx, bxx, byy, bww, bhh, bhh / 2, gd2, 'rgba(255,255,255,0.4)');
       ctx.restore();
       txt(ctx, selN > 0 ? ('还贡 (' + selN + ')') : '还贡', bxx + bww / 2, byy + bhh / 2 + 1, 14.5,
-        selN > 0 ? '#3b2a08' : '#26352d', 'center', 700);
+        selN > 0 ? '#3b2a08' : '#2b3850', 'center', 700);
       hits.push({ x: bxx, y: byy, w: bww, h: bhh, act: 'confirmReturn' });
     }
 
@@ -960,7 +960,7 @@
         var gotN = row.got || 0;
         var full = capped && gotN >= row.cap;
 
-        box(ctx, sx - 92, sy - 4, 80, phh + 8, 9, 'rgba(6,26,18,0.62)', 'rgba(201,169,97,0.28)');
+        box(ctx, sx - 92, sy - 4, 80, phh + 8, 9, 'rgba(10,20,34,0.62)', 'rgba(216,179,106,0.28)');
         txt(ctx, SEAT_NAMES[row.rel], sx - 52, sy + phh / 2 - 5, 13, C.gold, 'center', 600);
         txt(ctx, capped ? (full ? '已满' : ('剩 ' + (row.cap - gotN) + '/' + row.cap)) : (row.n + ' 张'),
           sx - 52, sy + phh / 2 + 11, 11.5, full ? '#d99a98' : C.dim, 'center');
@@ -981,7 +981,7 @@
   }
   // ---------- 结算 ----------
   function overlay(ctx, H, w, h) {
-    ctx.fillStyle = 'rgba(3,12,8,0.72)';
+    ctx.fillStyle = 'rgba(5,10,18,0.72)';
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -1026,7 +1026,7 @@
       var s = res.scores[p];
       txt(ctx, (s > 0 ? '+' : '') + s, cols[3], y, 17, s > 0 ? C.gold : s < 0 ? '#d99a98' : C.dim);
       txt(ctx, (mine > 0 ? '+' : '') + mine, cols[4], y, 17, mine > 0 ? C.gold : mine < 0 ? '#d99a98' : C.dim);
-      ctx.strokeStyle = 'rgba(201,169,97,0.12)';
+      ctx.strokeStyle = 'rgba(216,179,106,0.12)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(px + 32, y + 24);
@@ -1037,7 +1037,7 @@
     var isLast = S.round >= S.rounds;
     var bw = 240, bh = 58;
     box(ctx, W / 2 - bw / 2, py + ph - 92, bw, bh, 10, C.gold, null);
-    txt(ctx, isLast ? '看总成绩' : '下一局', W / 2, py + ph - 63, 21, '#132018', 'center', 600);
+    txt(ctx, isLast ? '看总成绩' : '下一局', W / 2, py + ph - 63, 21, '#101f33', 'center', 600);
     hits.push({ x: W / 2 - bw / 2, y: py + ph - 92, w: bw, h: bh, act: 'next' });
     ctx.restore();
   }
@@ -1066,7 +1066,7 @@
     var lh = land ? 36 : 28;
     var ry = ty + (land ? 86 : 84);
     var rh = lh * lines.length + (land ? 52 : 54);
-    box(ctx, cx, ry, cw, rh, 14, 'rgba(6,24,17,0.74)', C.panelLine);
+    box(ctx, cx, ry, cw, rh, 14, 'rgba(10,20,34,0.74)', C.panelLine);
     txt(ctx, '玩法', cx + (land ? 32 : 24), ry + (land ? 26 : 26), land ? 19 : 15, C.gold, 'left', 600);
     lines.forEach(function (l, i) {
       txt(ctx, '· ' + l, cx + (land ? 32 : 24),
@@ -1084,7 +1084,7 @@
     var chipH = land ? 80 : 66;
     chips.forEach(function (c, i) {
       var x = cx + i * (chipW + gapC);
-      box(ctx, x, sy, chipW, chipH, 12, 'rgba(9,30,21,0.82)', C.panelLine);
+      box(ctx, x, sy, chipW, chipH, 12, 'rgba(10,20,34,0.82)', C.panelLine);
       txt(ctx, c.label, x + chipW / 2, sy + chipH * 0.32, land ? 17 : 13, C.dim);
       txt(ctx, c.value, x + chipW / 2, sy + chipH * 0.68, land ? 26 : 17, C.text, 'center', 600);
       hits.push({ x: x, y: sy, w: chipW, h: chipH, act: c.act });
@@ -1094,7 +1094,7 @@
     var bw = land ? Math.min(cw * 0.56, 620) : Math.min(cw, 420);
     var bh = land ? 86 : 74;
     box(ctx, (W - bw) / 2, by, bw, bh, 14, C.gold, null);
-    txt(ctx, '开始游戏', W / 2, by + bh / 2 + 1, land ? 34 : 24, '#132018', 'center', 700);
+    txt(ctx, '开始游戏', W / 2, by + bh / 2 + 1, land ? 34 : 24, '#101f33', 'center', 700);
     hits.push({ x: (W - bw) / 2, y: by, w: bw, h: bh, act: 'startGame' });
 
     var ny = by + bh + (land ? 16 : 14);
@@ -1121,7 +1121,7 @@
     });
     var bw = 260, bh = 58;
     box(ctx, W / 2 - bw / 2, py + ph - 88, bw, bh, 10, C.gold, null);
-    txt(ctx, '再来一场', W / 2, py + ph - 59, 20, '#132018', 'center', 600);
+    txt(ctx, '再来一场', W / 2, py + ph - 59, 20, '#101f33', 'center', 600);
     hits.push({ x: W / 2 - bw / 2, y: py + ph - 88, w: bw, h: bh, act: 'newMatch' });
 
     box(ctx, W / 2 - bw / 2, py + ph - 22, bw, 42, 10, C.btn, C.panelLine);
@@ -1131,7 +1131,7 @@
 
   function toast(ctx, S, L) {
     var w = 420, h = 54;
-    box(ctx, W / 2 - w / 2, L.H - 400, w, h, 10, 'rgba(6,20,14,0.9)', C.panelLine);
+    box(ctx, W / 2 - w / 2, L.H - 400, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
     txt(ctx, S.toast, W / 2, L.H - 373, 17, C.text);
   }
 
@@ -1151,7 +1151,7 @@
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
-      txt(ctx, '创建房间', W / 2, by + 41, 24, '#132018', 'center', 600);
+      txt(ctx, '创建房间', W / 2, by + 41, 24, '#101f33', 'center', 600);
       hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netConfig' });
 
       by += 96;
@@ -1180,7 +1180,7 @@
         var cx0 = px + pw - 40 - tot;
         opts.forEach(function (o) {
           box(ctx, cx0, rowY - 8, o.w, 34, 8, o.on ? C.gold : C.btn, o.on ? null : C.panelLine);
-          txt(ctx, o.label, cx0 + o.w / 2, rowY + 9, 13, o.on ? '#132018' : C.text, 'center', o.on ? 600 : 400);
+          txt(ctx, o.label, cx0 + o.w / 2, rowY + 9, 13, o.on ? '#101f33' : C.text, 'center', o.on ? 600 : 400);
           hits.push({ x: cx0, y: rowY - 8, w: o.w, h: 34, act: 'cfgSet', key: o.key, v: o.v });
           cx0 += o.w + 8;
         });
@@ -1210,7 +1210,7 @@
 
       var cy2 = py + ph - 58;
       box(ctx, px + 40, cy2, 200, 42, 10, C.gold, null);
-      txt(ctx, '创建', px + 140, cy2 + 21, 17, '#132018', 'center', 600);
+      txt(ctx, '创建', px + 140, cy2 + 21, 17, '#101f33', 'center', 600);
       hits.push({ x: px + 40, y: cy2, w: 200, h: 42, act: 'netCfgConfirm' });
       box(ctx, px + 258, cy2, 140, 42, 10, C.btn, C.panelLine);
       txt(ctx, '返回', px + 328, cy2 + 21, 16, C.text, 'center');
@@ -1220,7 +1220,7 @@
       var tOn = !!RC.testTribute;
       box(ctx, px + 410, cy2, 206, 42, 10, tOn ? C.gold : C.btn, tOn ? null : C.panelLine);
       txt(ctx, (tOn ? '● ' : '○ ') + '开局即进贡', px + 513, cy2 + 21, 12.5,
-        tOn ? '#132018' : C.text, 'center', tOn ? 600 : 400);
+        tOn ? '#101f33' : C.text, 'center', tOn ? 600 : 400);
       hits.push({ x: px + 410, y: cy2, w: 206, h: 42, act: 'cfgSet', key: 'testTribute', v: !tOn });
       return;
     }
@@ -1234,7 +1234,7 @@
     var cx0 = W / 2 - totalW / 2;
     digits.forEach(function (d, i) {
       var x = cx0 + i * (cw + gapd);
-      box(ctx, x, py + 70, cw, 68, 10, 'rgba(6,26,18,0.7)', 'rgba(201,169,97,0.3)');
+      box(ctx, x, py + 70, cw, 68, 10, 'rgba(10,20,34,0.7)', 'rgba(216,179,106,0.3)');
       txt(ctx, d === '_' ? '' : d, x + cw / 2, py + 104, 26, C.text);
     });
 
@@ -1246,7 +1246,7 @@
       var cy = py + 154 + Math.floor(i / 3) * (kh + kgy);
       var primary = k === '进';
       box(ctx, cx, cy, kw, kh, 10, primary ? C.gold : C.btn, primary ? null : C.panelLine);
-      txt(ctx, k, cx + kw / 2, cy + kh / 2, 24, primary ? '#132018' : C.text, 'center', 600);
+      txt(ctx, k, cx + kw / 2, cy + kh / 2, 24, primary ? '#101f33' : C.text, 'center', 600);
       if (k === '退') hits.push({ x: cx, y: cy, w: kw, h: kh, act: 'netBackspace' });
       else if (k === '进') hits.push({ x: cx, y: cy, w: kw, h: kh, act: 'netJoin' });
       else hits.push({ x: cx, y: cy, w: kw, h: kh, act: 'netDigit', d: k });
@@ -1277,8 +1277,8 @@
 
     (S.seats || []).forEach(function (s, i) {
       var y = py + 178 + i * 56;
-      box(ctx, px + 40, y, pw - 80, 54, 10, 'rgba(6,26,18,0.6)',
-        s.isYou ? C.gold : 'rgba(201,169,97,0.18)');
+      box(ctx, px + 40, y, pw - 80, 54, 10, 'rgba(10,20,34,0.6)',
+        s.isYou ? C.gold : 'rgba(216,179,106,0.18)');
       txt(ctx, (s.isYou ? '你 · ' : '') + s.name, px + 62, y + 32, 18, C.text, 'left');
       var right = s.ai ? '机器人' : s.online ? (s.ready ? '已准备' : '未准备') : '空位';
       txt(ctx, right, px + pw - 62, y + 32, 15,
@@ -1289,7 +1289,7 @@
     var y2 = py + ph - 168;
     if (S.isHost) {
       box(ctx, W / 2 - bw / 2, y2, bw, bh, 10, C.gold, null);
-      txt(ctx, '开始（空位补机器人）', W / 2, y2 + 33, 18, '#132018', 'center', 600);
+      txt(ctx, '开始（空位补机器人）', W / 2, y2 + 33, 18, '#101f33', 'center', 600);
       hits.push({ x: W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netStart' });
     } else {
       box(ctx, W / 2 - bw / 2, y2, bw, bh, 10, C.btn, C.panelLine);
