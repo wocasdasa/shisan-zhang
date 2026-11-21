@@ -947,21 +947,32 @@
       var blockH = rows.length * phh + (rows.length - 1) * rowGap;
       var top = L.center.y - blockH / 2 - 2;
 
+      // 配额进度/置灰仅用于独食抽牌方向（winners.length===1，多败方行，got 按每家计）；
+      // 被抽方向只有一排且 drawnFrom 是跨胜方合计，cap 无意义，保持"N 张"不置灰；
+      // 2v2 的 cap 为 null（无上限），同样保持现状
+      var loneDraw = !!(T.plan && T.plan.winners && T.plan.winners.length === 1);
       rows.forEach(function (row, ri) {
         var n = Math.max(1, row.n);
         var totalW = n * pw + (n - 1) * gp2;
         var sx = Math.max(104, (W - totalW) / 2);
         var sy = top + ri * (phh + rowGap);
+        var capped = loneDraw && row.cap != null;
+        var gotN = row.got || 0;
+        var full = capped && gotN >= row.cap;
 
         box(ctx, sx - 92, sy - 4, 80, phh + 8, 9, 'rgba(6,26,18,0.62)', 'rgba(201,169,97,0.28)');
         txt(ctx, SEAT_NAMES[row.rel], sx - 52, sy + phh / 2 - 5, 13, C.gold, 'center', 600);
-        txt(ctx, row.n + ' 张', sx - 52, sy + phh / 2 + 11, 11.5, C.dim, 'center');
+        txt(ctx, capped ? (full ? '已满' : ('剩 ' + (row.cap - gotN) + '/' + row.cap)) : (row.n + ' 张'),
+          sx - 52, sy + phh / 2 + 11, 11.5, full ? '#d99a98' : C.dim, 'center');
 
+        ctx.save();
+        if (full) ctx.globalAlpha = 0.35;
         for (var i = 0; i < n; i++) {
           var cx2 = sx + i * (pw + gp2);
           drawBack(ctx, cx2, sy, pw, phh);
-          hits.push({ x: cx2 - 2, y: sy - 4, w: pw + 4, h: phh + 8, act: 'pullCard', p: row.rel, idx: i });
+          if (!full) hits.push({ x: cx2 - 2, y: sy - 4, w: pw + 4, h: phh + 8, act: 'pullCard', p: row.rel, idx: i });
         }
+        ctx.restore();
       });
 
       var doneTxt = '已抽 ' + (T.pull.done || 0) + ' / ' + (T.pull.total || 0) + ' 张';

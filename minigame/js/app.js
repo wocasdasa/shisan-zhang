@@ -470,8 +470,17 @@
 
     if (v.phase === 'tribute' && v.tribute) {
       var T = v.tribute;
+      // 联机配额映射：server/云函数广播的 pulledFrom 以绝对座位为键，客户端不知自身
+      // 绝对座位无法换算 rel，故从 draws（from 已是 rel，身份牌亮还不入 draws）逐家计数
+      var drawnFrom = {};
+      (T.draws || []).forEach(function (d) { drawnFrom[d.from] = (drawnFrom[d.from] || 0) + 1; });
+      var pairQuota = (typeof T.pairQuota === 'number') ? T.pairQuota : null;
+      var pull = T.pull || null;
+      if (pull && pull.rows && pairQuota != null) {
+        pull.rows.forEach(function (r) { r.cap = pairQuota; r.got = drawnFrom[r.rel] || 0; });
+      }
       S.tribute = {
-        plan: { count: T.count || 0, winnerRanks: T.winnerRanks || [], winners: [], losers: T.canDraw || [], skip: false },
+        plan: { count: T.count || 0, winnerRanks: T.winnerRanks || [], winners: T.winnersRel || [], losers: T.canDraw || [], skip: false },
         draws: T.draws || [],
         reveals: T.reveals || [],
         log: (T.log || []).slice(-6),
@@ -479,7 +488,9 @@
         need: T.need || 0,
         stage: T.stage || 'draw',
         canDraw: T.canDraw || [],
-        pull: T.pull || null,
+        pull: pull,
+        pairQuota: pairQuota,
+        drawnFrom: drawnFrom,
         ret: T.ret || null,
         targetRel: (typeof T.targetRel === 'number') ? T.targetRel : -1,
         turnW: (typeof T.turnWRel === 'number') ? T.turnWRel : -1,

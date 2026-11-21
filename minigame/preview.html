@@ -2867,21 +2867,32 @@ define("js/views.js", function (require, module, exports) {
       var blockH = rows.length * phh + (rows.length - 1) * rowGap;
       var top = L.center.y - blockH / 2 - 2;
 
+      // 配额进度/置灰仅用于独食抽牌方向（winners.length===1，多败方行，got 按每家计）；
+      // 被抽方向只有一排且 drawnFrom 是跨胜方合计，cap 无意义，保持"N 张"不置灰；
+      // 2v2 的 cap 为 null（无上限），同样保持现状
+      var loneDraw = !!(T.plan && T.plan.winners && T.plan.winners.length === 1);
       rows.forEach(function (row, ri) {
         var n = Math.max(1, row.n);
         var totalW = n * pw + (n - 1) * gp2;
         var sx = Math.max(104, (W - totalW) / 2);
         var sy = top + ri * (phh + rowGap);
+        var capped = loneDraw && row.cap != null;
+        var gotN = row.got || 0;
+        var full = capped && gotN >= row.cap;
 
         box(ctx, sx - 92, sy - 4, 80, phh + 8, 9, 'rgba(6,26,18,0.62)', 'rgba(201,169,97,0.28)');
         txt(ctx, SEAT_NAMES[row.rel], sx - 52, sy + phh / 2 - 5, 13, C.gold, 'center', 600);
-        txt(ctx, row.n + ' 张', sx - 52, sy + phh / 2 + 11, 11.5, C.dim, 'center');
+        txt(ctx, capped ? (full ? '已满' : ('剩 ' + (row.cap - gotN) + '/' + row.cap)) : (row.n + ' 张'),
+          sx - 52, sy + phh / 2 + 11, 11.5, full ? '#d99a98' : C.dim, 'center');
 
+        ctx.save();
+        if (full) ctx.globalAlpha = 0.35;
         for (var i = 0; i < n; i++) {
           var cx2 = sx + i * (pw + gp2);
           drawBack(ctx, cx2, sy, pw, phh);
-          hits.push({ x: cx2 - 2, y: sy - 4, w: pw + 4, h: phh + 8, act: 'pullCard', p: row.rel, idx: i });
+          if (!full) hits.push({ x: cx2 - 2, y: sy - 4, w: pw + 4, h: phh + 8, act: 'pullCard', p: row.rel, idx: i });
         }
+        ctx.restore();
       });
 
       var doneTxt = '已抽 ' + (T.pull.done || 0) + ' / ' + (T.pull.total || 0) + ' 张';
@@ -3720,8 +3731,17 @@ define("js/app.js", function (require, module, exports) {
 
     if (v.phase === 'tribute' && v.tribute) {
       var T = v.tribute;
+      // 联机配额映射：server/云函数广播的 pulledFrom 以绝对座位为键，客户端不知自身
+      // 绝对座位无法换算 rel，故从 draws（from 已是 rel，身份牌亮还不入 draws）逐家计数
+      var drawnFrom = {};
+      (T.draws || []).forEach(function (d) { drawnFrom[d.from] = (drawnFrom[d.from] || 0) + 1; });
+      var pairQuota = (typeof T.pairQuota === 'number') ? T.pairQuota : null;
+      var pull = T.pull || null;
+      if (pull && pull.rows && pairQuota != null) {
+        pull.rows.forEach(function (r) { r.cap = pairQuota; r.got = drawnFrom[r.rel] || 0; });
+      }
       S.tribute = {
-        plan: { count: T.count || 0, winnerRanks: T.winnerRanks || [], winners: [], losers: T.canDraw || [], skip: false },
+        plan: { count: T.count || 0, winnerRanks: T.winnerRanks || [], winners: T.winnersRel || [], losers: T.canDraw || [], skip: false },
         draws: T.draws || [],
         reveals: T.reveals || [],
         log: (T.log || []).slice(-6),
@@ -3729,7 +3749,9 @@ define("js/app.js", function (require, module, exports) {
         need: T.need || 0,
         stage: T.stage || 'draw',
         canDraw: T.canDraw || [],
-        pull: T.pull || null,
+        pull: pull,
+        pairQuota: pairQuota,
+        drawnFrom: drawnFrom,
         ret: T.ret || null,
         targetRel: (typeof T.targetRel === 'number') ? T.targetRel : -1,
         turnW: (typeof T.turnWRel === 'number') ? T.turnWRel : -1,
