@@ -94,10 +94,12 @@ function viewFor(room, viewer) {
       draws: T.draws.map((d) => ({ from: rel(d.from), card: d.card })),
       reveals: T.reveals.map((v) => ({ owner: rel(v.owner), card: v.card })),
       log: T.log.slice(-6),
-      need: T.stage === 'return' ? T.needFor(viewer) : 0,
+      need: T.stage === 'return' ? (T.drawsDone[viewer] || 0) : 0,
       myTurnToDraw: T.stage === 'draw' && room.tribute && room.tribute.drawingSeat === viewer,
       canDraw: (T.plan.losers || []).map((s) => rel(s)),
-      winnersRel: (T.plan.winners || []).map((s) => rel(s))
+      winnersRel: (T.plan.winners || []).map((s) => rel(s)),
+      pairQuota: T.pairQuota || null,
+      pulledFrom: T.drawnFrom || {}
     };
   }
 
@@ -212,6 +214,9 @@ function afterDeal(room) {
         stage: 'draw',
         drawingSeat: -1,
         drawsDone: {},
+        pairQuota: plan.pairQuota || null,
+        drawnFrom: {},   // 座位 → 已被抽走张数（只计成功抽走的，身份牌亮还不计）
+        turnIdx: 0,      // 独食被抽方向逐家交错：当前轮到 winners 的第几位
         needFor: function (seat) {
           const idx = this.plan.winners.indexOf(seat);
           if (idx < 0) return 0;
@@ -242,9 +247,17 @@ function startPlayAfterTribute(room, leadSeat) {
 }
 
 // ---------- 进贡 ----------
+// 独食被抽方向（pairQuota 非空且 losers.length===1，即三家每人抽独食 q 张）判定
+function isLoneInterleave(T) {
+  return !!(T && T.pairQuota && T.plan.losers && T.plan.losers.length === 1);
+}
+
 function advanceTribute(room) {
   const T = room.tribute;
   if (!T) return;
+  // 独食被抽方向必须逐家交错（控制器裁决）：每位胜方 抽满配额→立即还贡→下一位，
+  // 独食者恒持 ♠3/♠A 不可抽，"先全抽后统一还"牌池只有 11 张必然缺额
+  if (isLoneInterleave(T)) { advanceInterleave(room); return; }
   const winners = T.plan.winners;
 
   for (let i = 0; i < winners.length; i++) {
@@ -266,26 +279,20 @@ function advanceTribute(room) {
       if (!cur || cur.stage !== 'draw') return;
       const seat = cur.drawingSeat;
       if (seat < 0) return;
-      let guard = 0;
-      while (cur.needFor(seat) > 0 && guard++ < 8) {
-        const losers = cur.plan.losers || [];
-        if (!losers.length) break;
-        tributeDrawOne(room, seat, losers[Math.floor(Math.random() * losers.length)]);
-      }
+      aiTributeDraw(room, seat, cur.needFor(seat));
       advanceTribute(room);
     });
     return;
   }
 
-  // 抽牌全部完成 → 还贡
+  // 抽牌全部完成 → 还贡（还贡阶段 drawsDone = 尚未归还的张数）
   for (let i = 0; i < winners.length; i++) {
     const w = winners[i];
     if (room.seats[w] && room.seats[w].ai) {
       aiTributeReturn(room, w);
     }
   }
-  const humanWinners = winners.filter((w) => !(room.seats[w] && room.seats[w].ai));
-  const pendingReturn = humanWinners.filter((w) => T.needFor(w) > 0);
+  const pendingReturn = winners.filter((w) => (T.drawsDone[w] || 0) > 0);
   if (pendingReturn.length) {
     T.stage = 'return';
     T.drawingSeat = -1;
@@ -295,7 +302,7 @@ function advanceTribute(room) {
       if (!cur || cur.stage !== 'return') return;
       cur.plan.winners.forEach((w) => {
         if (room.seats[w] && room.seats[w].ai) return;
-        if (cur.needFor(w) > 0) aiTributeReturn(room, w);
+        if ((cur.drawsDone[w] || 0) > 0) aiTributeReturn(room, w);
       });
       finishTribute(room);
     });
@@ -304,13 +311,73 @@ function advanceTribute(room) {
   finishTribute(room);
 }
 
+// 独食被抽方向逐家交错：当前胜方抽满 q 张 → 立即向独食者还贡 q 张 → 推进下一位
+function advanceInterleave(room) {
+  const T = room.tribute;
+  const winners = T.plan.winners;
+  while (T.turnIdx < winners.length) {
+    const idx = T.turnIdx;
+    const w = winners[idx];
+    if (T.drawsDone[w] === undefined) T.drawsDone[w] = 0;
+    const isAI = room.seats[w] && room.seats[w].ai;
+    if (T.stage !== 'return') {
+      // 当前胜方的抽牌阶段（配额按每位胜方 drawsDone/shares 计）
+      const need = T.needFor(w);
+      if (need > 0) {
+        if (isAI) { aiTributeDraw(room, w, need); continue; }
+        T.drawingSeat = w;
+        T.stage = 'draw';
+        broadcast(room);
+        armTributeTimer(room, () => {
+          const cur = room.tribute;
+          if (!cur || cur.stage !== 'draw') return;
+          const seat = cur.drawingSeat;
+          if (seat < 0) return;
+          aiTributeDraw(room, seat, cur.needFor(seat));
+          advanceTribute(room);
+        });
+        return;
+      }
+      T.stage = 'return';
+    }
+    // 当前胜方抽满 → 立即还贡（还给唯一败方=独食者，牌池回填后再推进下一位）
+    if (isAI) {
+      aiTributeReturn(room, w);
+      T.turnIdx++;
+      T.stage = 'draw';
+      continue;
+    }
+    if ((T.drawsDone[w] || 0) > 0) {
+      T.drawingSeat = -1;
+      broadcast(room);
+      armTributeTimer(room, () => {
+        const cur = room.tribute;
+        if (!cur || cur.stage !== 'return') return;
+        aiTributeReturn(room, w);
+        cur.turnIdx++;
+        cur.stage = 'draw';
+        advanceTribute(room);
+      });
+      return;
+    }
+    T.turnIdx++;
+    T.stage = 'draw';
+  }
+  finishTribute(room);
+}
+
 function tributeDrawOne(room, winner, loser) {
   const T = room.tribute;
   const g = room.game;
-  if (!T || !g) return;
+  if (!T || !g) return false;
+  // 每败方上限只挂独食抽牌方向（winners.length===1，多败方）；被抽方向
+  // （losers.length===1）drawnFrom 是三家合计，配额按每位胜方 drawsDone/shares 计，
+  // 此处若误拦会与逐家交错流程死锁（同单机 perLoserCap 裁决）
+  const perLoserCap = !!(T.pairQuota && T.plan.winners && T.plan.winners.length === 1);
+  if (perLoserCap && (T.drawnFrom[loser] || 0) >= T.pairQuota) return false;
   for (let guard = 0; guard < 40; guard++) {
     const hand = g.players[loser].hand;
-    if (!hand.length) return;
+    if (!hand.length) return false;
     const idx = Math.floor(Math.random() * hand.length);
     const card = hand[idx];
     if (GX.Tribute.isIdentity(card)) {
@@ -324,35 +391,66 @@ function tributeDrawOne(room, winner, loser) {
     g.players[winner].hand.push(card);
     T.draws.push({ from: loser, to: winner, card });
     T.drawsDone[winner] = (T.drawsDone[winner] || 0) + 1;
+    T.drawnFrom[loser] = (T.drawnFrom[loser] || 0) + 1;
     T.log.push({ text: playerName(room, winner) + ' 从 ' + playerName(room, loser) + ' 抽到 ' + cardName(card), kind: 'draw' });
-    return;
+    return true;
   }
+  return false;
 }
 
 function aiTributeDraw(room, winner, need) {
   const T = room.tribute;
+  const idx = T.plan.winners.indexOf(winner);
   for (let k = 0; k < need; k++) {
-    const losers = T.plan.losers;
-    tributeDrawOne(room, winner, losers[Math.floor(Math.random() * losers.length)]);
+    // 独食被抽方向（losers.length===1）：目标恒为唯一败方，配额按每位胜方
+    // drawsDone/shares 计；其余方向从尚未被抽满 pairQuota 的败方中随机选
+    let targets;
+    if (T.pairQuota && T.plan.losers.length === 1) {
+      targets = T.plan.losers;
+    } else {
+      targets = GX.Tribute.freeLosers(T.plan, T.drawnFrom);
+      if (!targets.length) {
+        // 兜底：13 张牌池理论充足不会走到这里；防死循环强制视为完成——
+        // 把该胜方配额收缩到实际抽到的张数（needFor→0，还贡也不多还）
+        T.shares[idx] = T.drawsDone[winner] || 0;
+        return;
+      }
+    }
+    if (!tributeDrawOne(room, winner, targets[Math.floor(Math.random() * targets.length)])) {
+      // 理论不可达：抽不动时同样收缩配额强制完成（还贡按实际被抽记录进行）
+      T.shares[idx] = T.drawsDone[winner] || 0;
+      return;
+    }
   }
+}
+
+// 该胜方下一笔未归还的被抽记录（还贡按笔还给原主人，与引擎 run() 一致）
+function nextUnreturnedDraw(T, winner) {
+  for (let i = 0; i < T.draws.length; i++) {
+    const d = T.draws[i];
+    if (d.to === winner && !d.returned) return d;
+  }
+  return null;
 }
 
 function aiTributeReturn(room, winner) {
   const g = room.game;
   const T = room.tribute;
-  const mine = g.players[winner].hand.slice()
-    .filter((c) => !GX.Tribute.isIdentity(c))
-    .sort((a, b) => GX.Rules.rankVal(a.r, room.cfg.rankOrder) - GX.Rules.rankVal(b.r, room.cfg.rankOrder));
-  const toGive = mine.slice(0, T.needFor(winner));
-  const loser = T.plan.losers[0];
-  toGive.forEach((card) => {
-    const i = g.players[winner].hand.findIndex((x) => x.r === card.r && x.s === card.s);
-    if (i < 0) return;
+  let d;
+  while ((d = nextUnreturnedDraw(T, winner))) {
+    const mine = g.players[winner].hand.slice()
+      .filter((c) => !GX.Tribute.isIdentity(c))
+      .sort((a, b) => GX.Rules.rankVal(a.r, room.cfg.rankOrder) - GX.Rules.rankVal(b.r, room.cfg.rankOrder));
+    if (!mine.length) break;
+    const give = mine[0];
+    const i = g.players[winner].hand.findIndex((x) => x.r === give.r && x.s === give.s);
+    if (i < 0) break;
     g.players[winner].hand.splice(i, 1);
-    g.players[loser].hand.push(card);
+    g.players[d.from].hand.push(give);
+    d.returned = true;
     T.drawsDone[winner] = Math.max(0, (T.drawsDone[winner] || 0) - 1);
-    T.log.push({ text: playerName(room, winner) + ' 还贡 ' + cardName(card) + ' 给 ' + playerName(room, loser), kind: 'ret' });
-  });
+    T.log.push({ text: playerName(room, winner) + ' 还贡 ' + cardName(give) + ' 给 ' + playerName(room, d.from), kind: 'ret' });
+  }
 }
 
 function finishTribute(room) {
@@ -533,6 +631,12 @@ function handle(conn, msg) {
     const relLoser = Number(msg.seatRel);
     const loser = (seat + relLoser) % 4;
     if (T.plan.losers.indexOf(loser) < 0) { send(conn, { t: 'err', msg: '只能抽败方的牌' }); return; }
+    // 每败方上限只适用独食抽牌方向（winners.length===1）；被抽方向配额按每位胜方计
+    const perLoserCap = !!(T.pairQuota && T.plan.winners && T.plan.winners.length === 1);
+    if (perLoserCap && GX.Tribute.freeLosers(T.plan, T.drawnFrom).indexOf(loser) < 0) {
+      send(conn, { t: 'err', msg: '这家已抽满' });
+      return;
+    }
     tributeDrawOne(room, seat, loser);
     if (T.needFor(seat) > 0) { broadcast(room); return; }
     advanceTribute(room);
@@ -543,26 +647,37 @@ function handle(conn, msg) {
     const T = room.tribute;
     if (!T || T.stage !== 'return') return;
     if (T.plan.winners.indexOf(seat) < 0) return;
+    // 独食被抽方向逐家交错：只有当前轮次的胜方可还贡
+    if (isLoneInterleave(T) && T.plan.winners[T.turnIdx] !== seat) return;
     const g = room.game;
     const cards = msg.cards || [];
-    const need = T.needFor(seat);
+    const need = T.drawsDone[seat] || 0;
     const picked = cards.filter((c, i, arr) =>
       arr.findIndex((x) => x.r === c.r && x.s === c.s) === i);
     if (picked.length !== need) { send(conn, { t: 'err', msg: '要还 ' + need + ' 张' }); return; }
-    const target = T.plan.losers[0];
     picked.forEach((c) => {
       const i = g.players[seat].hand.findIndex((x) => x.r === c.r && x.s === c.s);
       if (i < 0) return;
+      const d = nextUnreturnedDraw(T, seat);
+      if (!d) return;
       g.players[seat].hand.splice(i, 1);
-      g.players[target].hand.push({ r: c.r, s: c.s });
+      g.players[d.from].hand.push({ r: c.r, s: c.s });
+      d.returned = true;
       T.drawsDone[seat] = Math.max(0, (T.drawsDone[seat] || 0) - 1);
-      T.log.push({ text: playerName(room, seat) + ' 还贡 ' + cardName(c) + ' 给 ' + playerName(room, target), kind: 'ret' });
+      T.log.push({ text: playerName(room, seat) + ' 还贡 ' + cardName(c) + ' 给 ' + playerName(room, d.from), kind: 'ret' });
     });
-    if (T.needFor(seat) <= 0) {
-      const remaining = T.plan.winners.filter((w) => !(room.seats[w] && room.seats[w].ai));
-      const done = remaining.filter((w) => T.needFor(w) > 0);
-      if (!done.length) finishTribute(room);
-      else { T.stage = 'return'; broadcast(room); }
+    if ((T.drawsDone[seat] || 0) <= 0) {
+      if (isLoneInterleave(T)) {
+        T.turnIdx++;
+        T.stage = 'draw';
+        advanceTribute(room);
+      } else {
+        const remaining = T.plan.winners.filter((w) => (T.drawsDone[w] || 0) > 0);
+        if (!remaining.length) finishTribute(room);
+        else { T.stage = 'return'; broadcast(room); }
+      }
+    } else {
+      broadcast(room);
     }
     return;
   }
