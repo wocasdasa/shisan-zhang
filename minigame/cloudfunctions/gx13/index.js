@@ -112,6 +112,8 @@ function viewFor(room, viewer) {
     view.tribute = {
       stage: T.stage,
       count: T.count,
+      pairQuota: T.pairQuota || null,
+      pulledFrom: T.pulledFrom || {},
       winnerRanks: T.winnerRanks || [],
       draws: T.draws.map((d) => ({ from: rel(d.from), to: rel(d.to), card: d.card })),
       reveals: T.reveals.map((v) => ({ owner: rel(v.owner), card: v.card })),
@@ -312,6 +314,7 @@ function startTribute(room, plan) {
   const rounds = winners.slice()
   room.tributeShow = {
     count: plan.count,
+    pairQuota: plan.pairQuota || null, // 独食每败方上限（2v2 为 null）
     winners: winners,
     losers: losers,
     winnerRanks: plan.winnerRanks,
@@ -321,7 +324,7 @@ function startTribute(room, plan) {
     stage: 'draw',
     current: null,
     draws: [], returned: [], reveals: [], log: [],
-    picks: [], deadline: 0
+    picks: [], pulledFrom: {}, deadline: 0 // pulledFrom：座位→已被抽走张数（身份牌亮还不计）
   }
   room.phase = 'tribute'
   room.deadline = 0
@@ -358,7 +361,10 @@ function openTributePull(room, target) {
   // 独食：三家败方一起摊开，一轮抽 3N；2v2：只摊选中的那一家
   T.targets = (T.winners.length === 1) ? freeTargetsOf(T) : [target]
   T.target = target
-  T.total = T.count * T.targets.length
+  // 独食 plan.count 已是 quota×3 的总数，须按每败方配额 per 计 total，
+  // 否则第 1 名重贡会算出 12×3=36（应为 4×3=12）；2v2 pairQuota=null 时 per=count 不变
+  const per = T.pairQuota || T.count
+  T.total = per * T.targets.length
   T.pulled = 0
   T.roundStart = T.draws.length
   T.stage = 'pull'
@@ -373,6 +379,11 @@ function pullOne(room, target, idx) {
   const P = room.game.players
   const w = T.turnW
   if (!T.targets || T.targets.indexOf(target) < 0) return
+  // 每败方上限只挂独食抽牌方向（winners.length===1）；被抽方向（losers.length===1）
+  // 每位胜方配额由 T.total=per×1 与逐家交错轮次保证，pulledFrom 跨轮累计，
+  // 此处若误拦会与交错流程死锁（同单机/联机 server 的 perLoserCap 裁决）
+  const perLoserCap = !!(T.pairQuota && T.winners && T.winners.length === 1)
+  if (perLoserCap && (T.pulledFrom[target] || 0) >= T.pairQuota) return
   const pool = P[target].hand
   if (!pool.length) return
   const order = pool.slice()
@@ -396,6 +407,7 @@ function pullOne(room, target, idx) {
   T.draws.push({ from: target, to: w, card: card })
   T.log.push({ text: playerName(room, w) + ' 从 ' + playerName(room, target) + ' 抽到 ' + cardName(card), kind: 'draw' })
   T.pulled = (T.pulled || 0) + 1
+  T.pulledFrom[target] = (T.pulledFrom[target] || 0) + 1
 
   if (T.pulled >= T.total) {
     // 抽满 → 还贡：按被抽走的牌从大到小，一张一张还
@@ -469,12 +481,22 @@ function endTributeRound(room) {
 // AI / 超时：自动摊牌、抽满、逐张还
 function autoTribute(room) {
   const T = room.tributeShow
-  const avail = freeTargetsOf(T)
-  if (!avail.length) return
-  openTributePull(room, avail[Math.floor(Math.random() * avail.length)])
+  // 独食被抽方向（pairQuota 非空且 losers.length===1）：每位胜方的完成判据是其自身
+  // pulled 达 per（T.total=per×1），目标恒为唯一败方——pulledFrom 跨轮累计，
+  // 不得用 freeLosers 空判完成（控制器修订）；该判据只用于独食抽牌方向（winners=1）
+  const loneDrawn = !!(T.pairQuota && T.losers && T.losers.length === 1)
+  if (T.stage === 'draw') {
+    const avail = loneDrawn ? T.losers.slice()
+      : GX.Tribute.freeLosers({ losers: freeTargetsOf(T), pairQuota: T.pairQuota }, T.pulledFrom)
+    if (!avail.length) { endTributeRound(room); return }
+    openTributePull(room, avail[Math.floor(Math.random() * avail.length)])
+  }
   let guard = 0
   while (T.stage === 'pull' && guard++ < T.total + 8) {
-    const rows = T.targets.filter((s) => room.game.players[s].hand.length > 0)
+    const rows0 = T.targets.filter((s) => room.game.players[s].hand.length > 0)
+    // 抽牌方向跳过已抽满 pairQuota 的败方；被抽方向不做空判（见上）
+    const rows = loneDrawn ? rows0
+      : GX.Tribute.freeLosers({ losers: rows0, pairQuota: T.pairQuota }, T.pulledFrom)
     if (!rows.length) break
     pullOne(room, rows[Math.floor(Math.random() * rows.length)], Math.floor(Math.random() * 40))
   }
