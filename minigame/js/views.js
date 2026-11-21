@@ -427,6 +427,27 @@
   }
 
   // ---------- 座位 ----------
+  // 被抽走的牌在座位旁扇形展开：每张横移 18px（≥16）+ 纵移 8px 斜向下，避开邻座；
+  // 牌 30×42，最多 5 张（超出取最后 5 张），每张 rank/suit 左角标完整可见。
+  // dir=1 向右下展开（x=首张左边），dir=-1 向左下展开（x=首张右边，远端先画保住角标）。
+  function drawnFan(ctx, cards, x, y, dir) {
+    var show = cards.slice(-5);
+    var cw = 30, ch = 42, stepX = 18, stepY = 8;
+    dir = dir < 0 ? -1 : 1;
+    var order = [];
+    for (var i = 0; i < show.length; i++) order.push(i);
+    if (dir < 0) order.reverse();
+    order.forEach(function (i) {
+      var cx = dir > 0 ? x + i * stepX : x - cw - i * stepX;
+      var cy = y + i * stepY;
+      ctx.save();
+      ctx.translate(cx + cw / 2, cy + ch / 2);
+      ctx.rotate(dir * (-0.05 + i * 0.025));
+      drawCard(ctx, -cw / 2, -ch / 2, cw, ch, show[i], { mark: true });
+      ctx.restore();
+    });
+  }
+
   function seatPlate(ctx, S, p, rect, hits) {
     var g = S.game;
     var pts = S.scores[p] || 0;
@@ -436,11 +457,23 @@
     if (ds && p !== 0) count = Math.min(count, ds.arrived[p]);
     if (ds && p === 0) count = Math.min(count, ds.arrived[0]);
 
+    var rc = g ? (g.players[p].revealedCards || []) : [];
+    var lone = rc.indexOf(3) >= 0 && rc.indexOf(14) >= 0;
+
     var compact = rect.w <= 130;
-    var ar = Math.max(16, Math.min(25, Math.round(rect.h / 2.2)));
-    var ax = rect.x + 10 + ar, ay = rect.y + rect.h / 2;
+    // 新结构：左圆徽（直径 40）+ 名字 + 下行「N 张 · +分」
+    var ar = Math.min(20, Math.max(14, Math.floor(rect.h / 2) - 6));
+    var ax = rect.x + 8 + ar, ay = rect.y + rect.h / 2;
     box(ctx, rect.x, rect.y, rect.w, rect.h, 12, 'rgba(10,20,34,0.55)',
-      active ? C.gold : 'rgba(216,179,106,0.22)');
+      lone ? C.red : active ? C.gold : 'rgba(216,179,106,0.22)');
+    if (lone) { // 独食者：朱红边框常驻
+      ctx.save();
+      rr(ctx, rect.x, rect.y, rect.w, rect.h, 12);
+      ctx.strokeStyle = C.red;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
+    }
     ctx.save();
     ctx.beginPath();
     ctx.arc(ax, ay, ar, 0, Math.PI * 2);
@@ -450,7 +483,7 @@
     ctx.lineWidth = active ? 2 : 1;
     ctx.stroke();
     ctx.restore();
-    txt(ctx, SEAT_NAMES[p].charAt(0), ax, ay + 1, compact ? 16 : 18, active ? C.gold : C.text, 'center', 700);
+    txt(ctx, SEAT_NAMES[p].charAt(0), ax, ay + 1, compact ? 15 : 17, active ? C.gold : C.text, 'center', 700);
 
     // 该家刚出牌：一圈金色脉冲
     if (S.fx && S.fx.seatPlay && S.fx.seatPlay.p === p) {
@@ -478,27 +511,42 @@
       ctx.restore();
     }
 
-    txt(ctx, SEAT_NAMES[p], rect.x + 10 + ar * 2 + 8, rect.y + rect.h / 2 - 5, compact ? 14 : 16, active ? C.gold : C.text, 'left', 600);
-    txt(ctx, g ? (count + ' 张') : '—', rect.x + 10 + ar * 2 + 8, rect.y + rect.h / 2 + 13, compact ? 12 : 13, C.dim, 'left');
-
-    // 身份标记
-    var rc = g ? (g.players[p].revealedCards || []) : [];
-    var mw = rc.length * 40 + (rc.indexOf(3) >= 0 && rc.indexOf(14) >= 0 ? 50 : 0);
-    var my = (p === 0) ? rect.y - 24 : rect.y + rect.h + 4;
-    var bx = rect.x + rect.w / 2 - mw / 2 + 20;
-    rc.forEach(function (r) {
-      box(ctx, bx - 19, my, 38, 20, 5, 'rgba(216,179,106,0.16)', C.goldDim);
-      txt(ctx, r === 3 ? '♠3' : '♠A', bx, my + 11, 12, C.gold, 'center');
-      bx += 42;
-    });
-    if (rc.indexOf(3) >= 0 && rc.indexOf(14) >= 0) {
-      box(ctx, bx - 24, my, 48, 20, 5, 'rgba(176,42,47,0.22)', 'rgba(176,42,47,0.55)');
-      txt(ctx, '独食', bx, my + 11, 12, '#e8b0ae', 'center');
+    // 名字（上行）+ 下行「N 张 · +分」（分数并入，不再挂右端）
+    var lx = rect.x + 8 + ar * 2 + 8;
+    var nameFs = compact ? 14 : 16;
+    txt(ctx, SEAT_NAMES[p], lx, rect.y + rect.h / 2 - 11, nameFs, active ? C.gold : C.text, 'left', 600);
+    var subFs = compact ? 11 : 12;
+    var ly = rect.y + rect.h / 2 + 11;
+    var pre = g ? (count + ' 张 · ') : '—';
+    txt(ctx, pre, lx, ly, subFs, C.dim, 'left');
+    if (g) {
+      ctx.font = '400 ' + subFs + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      var off = ctx.measureText(pre).width;
+      txt(ctx, (pts > 0 ? '+' : '') + pts + '分', lx + off, ly, subFs,
+        pts > 0 ? C.gold : pts < 0 ? '#d99a98' : C.dim, 'left', 600);
     }
 
-    // 分数
-    txt(ctx, (pts > 0 ? '+' : '') + pts, rect.x + rect.w - 10, rect.y + 15, compact ? 13 : 15,
-      pts > 0 ? C.gold : pts < 0 ? '#d99a98' : C.dim, 'right', 600);
+    // 独食者：「独食」字常驻牌右上角
+    if (lone) {
+      txt(ctx, '独食', rect.x + rect.w - 8, rect.y + 12, 11, '#e8b0ae', 'right', 700);
+    }
+
+    // 身份标记：黑金圆徽（♠3/♠A），南家在牌上方、其余在牌下方
+    var br = 12, bn = rc.length;
+    rc.forEach(function (r, i) {
+      var cx = rect.x + rect.w / 2 + (i - (bn - 1) / 2) * (br * 2 + 6);
+      var cy = (p === 0) ? rect.y - br - 2 : rect.y + rect.h + br + 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, br, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(8,12,22,0.92)';
+      ctx.fill();
+      ctx.strokeStyle = C.gold;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+      txt(ctx, '♠' + rankText(r), cx, cy + 1, 11, C.gold, 'center', 600);
+    });
   }
 
   function seats(ctx, S, L, hits) {
@@ -564,14 +612,14 @@
             box(ctx, rect.x - 2, rect.y + rect.h - 2, 40, 18, 6, 'rgba(176,42,47,0.92)', null);
             txt(ctx, '已抽', rect.x + 18, rect.y + rect.h + 7, 11, '#ffe9e0', 'center', 600);
           }
-          // 被抽走的牌挂在他座位旁（亮出来）
-          var got = (TR.draws || []).filter(function (d) { return d.from === p; }).slice(-3);
-          got.forEach(function (d, gi) {
-            var gx2 = rect.x + rect.w + 10 + gi * 6;
-            if (gx2 + 34 > W - 8) gx2 = rect.x - 40 - gi * 6;
-            var gy2 = rect.y + 6 + gi * 8;
-            drawCard(ctx, gx2, gy2, 34, 44, d.card, { mark: true });
-          });
+          // 被抽走的牌挂在他座位旁（亮出来）：按 TR.draws 逐座位过滤，扇形斜向下展开
+          var drawnCards = (TR.draws || []).filter(function (d) { return d.from === p; })
+            .map(function (d) { return d.card; });
+          if (drawnCards.length) {
+            var fDir = posNm === 'east' ? -1 : 1; // 西/北向右下、东向左下，避开邻座与屏幕边缘
+            var fx0 = fDir > 0 ? rect.x + rect.w + 10 : rect.x - 10;
+            drawnFan(ctx, drawnCards, fx0, rect.y + rect.h + 6, fDir);
+          }
       }
       // 轮到谁出牌：时钟浮在他头上（自己的回合在底部按钮条里显示）
       if (p !== 0 && S.phase === 'play' && S.game && !S.game.over && S.game.turn === p) {
