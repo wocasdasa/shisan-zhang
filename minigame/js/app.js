@@ -614,6 +614,8 @@
     }
     if (!T.humanIsWinner) return;
     if ((T.humanDrawn || []).length >= (T.need || 0)) return;
+    // lone = 独食抽牌方向（独食为唯一胜方，多行摊开）；每败方上限拦截只挂在这个方向，
+    // 被抽方向（losers.length===1）drawnFrom 是三家合计，不能用来拦当前真人胜方
     var lone = !!(T.pairQuota && T.plan && T.plan.winners && T.plan.winners.length === 1);
     if (lone && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     T.stage = 'pull';
@@ -634,7 +636,10 @@
     if (!T || T.stage !== 'pull' || !T.pull) return;
     if (S.mode === 'online') { NET.send({ t: 'pullPick', seatRel: rel, idx: idx }); return; }
     var p = rel;
-    if (T.pairQuota && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
+    // 每败方上限仅适用独食抽牌方向（winners.length===1）；被抽方向（losers.length===1）
+    // 配额按每位胜方计，drawnFrom[lone] 是跨胜方合计，此处若误拦真人会与 aiJobPending 死锁
+    var perLoserCap = !!(T.pairQuota && T.plan && T.plan.winners && T.plan.winners.length === 1);
+    if (perLoserCap && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
     var hand = S.game.players[p].hand;
     if (!hand.length) return;
     var k = Math.max(0, Math.min(idx, hand.length - 1));
