@@ -813,7 +813,7 @@
     mine.slice(0, n).forEach(function (c, i) {
       var sel = S.selected.some(function (s) { return s.r === c.r && s.s === c.s; });
       var x = hx + i * step;
-      var y = L.hand.y - (sel ? 20 : 0);
+      var y = L.hand.y - (sel ? 22 : 0);
       drawCard(ctx, x, y, L.hand.cardW, L.hand.cardH, c, { mark: sel });
       hits.push({ x: x, y: y, w: Math.min(step, L.hand.cardW), h: L.hand.cardH, act: 'card', i: i });
     });
@@ -834,24 +834,24 @@
     if (!can) return;
 
     var barH = 44;
-    var barY = L.landscape ? (L.hand.y - barH - 8) : (L.hand.y - barH - 12);
-    var wPass = 108, wHint = 108, wPlay = 126, rClock = 24, gapB = 12;
-    var total = wPass + gapB + rClock * 2 + gapB + wHint + gapB + wPlay;
-    var bx = Math.round(W / 2 - total / 2);
-
-    pill(ctx, bx, barY, wPass, barH, '不出', can && g && !!g.combo, hits, 'pass', 'gold');
-    bx += wPass + gapB;
-
-    clockChip(ctx, bx + rClock, barY + barH / 2, rClock, S.timer.left, S.phase === 'play');
-    bx += rClock * 2 + gapB;
+    // 操作条迁入 layout 的 actions 区（竖屏为底部带，远离南家座位牌，消除叠压）
+    var barY = L.actions.y + (L.actions.h - barH) / 2;
+    var wHint = 108, wPass = 108, wPlay = 126, gapB = 12;
+    var total = wHint + gapB + wPass + gapB + wPlay;
+    var bx = L.actions.right ? Math.round(W - 24 - total) : Math.round(W / 2 - total / 2);
 
     pill(ctx, bx, barY, wHint, barH, '提示', can, hits, 'hint', 'gold');
     bx += wHint + gapB;
 
-    pill(ctx, bx, barY, wPlay, barH, '出牌', can, hits, 'play', 'blue');
+    pill(ctx, bx, barY, wPass, barH, '不出', can && g && !!g.combo, hits, 'pass', 'gold');
+    bx += wPass + gapB;
+
+    // 倒计时嵌在「出牌」按钮左侧：复用 clockChip 画法（半径 14），剩余秒数在环心
+    pill(ctx, bx, barY, wPlay, barH, '出牌', can, hits, 'play', 'blue', 20);
+    clockChip(ctx, bx + 26, barY + barH / 2, 14, S.timer.left, S.phase === 'play');
   }
 
-  function pill(ctx, x, y, w, h, label, enabled, hits, act, tone) {
+  function pill(ctx, x, y, w, h, label, enabled, hits, act, tone, labelDx) {
     var r = h / 2;
     var fill = !enabled ? 'rgba(16,28,46,0.55)' : tone === 'blue' ? '#3b86d8' : '#e9b84d';
     var line = !enabled ? 'rgba(216,179,106,0.14)' : tone === 'blue' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.5)';
@@ -867,7 +867,7 @@
       ctx.fill();
       ctx.restore();
     }
-    txt(ctx, label, x + w / 2, y + h / 2 + 1, 18,
+    txt(ctx, label, x + w / 2 + (labelDx || 0), y + h / 2 + 1, 18,
       enabled ? (tone === 'blue' ? '#ffffff' : '#4a2f08') : 'rgba(242,234,216,0.4)', 'center', 600);
     if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
   }
