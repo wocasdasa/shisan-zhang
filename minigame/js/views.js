@@ -398,22 +398,27 @@
       ring(ctx, cx, cy, 90, t1, '216,179,106');
     }
 
-    // 第二幕：12 枚 ♠ 粒子自落点炸开（全程，金/银交替）
-    ctx.save();
-    for (var i = 0; i < 12; i++) {
-      var ang = (i / 12) * Math.PI * 2 + 0.26;
-      var dist = 120 * easeOut(p) * (0.62 + ((i * 41) % 38) / 100);
-      var px = cx + Math.cos(ang) * dist;
-      var py = cy + Math.sin(ang) * dist * 0.66;
-      var sz = 15 * (1 - p * 0.55) + 3;
-      ctx.globalAlpha = Math.max(0, 0.95 - p * 0.9);
+    // 第二幕：12 枚 ♠ 粒子自落点炸开（全程，金/银交替）。
+    // 粒子预算：settle 彩带（confetti 22 枚）活跃期内跳过本组粒子——
+    // 否则「黑桃同花顺（含♠A）收尾」场景 34+22+12=68 会突破同屏 ≤60 硬约束
+    var settleOn = S.fx && S.fx.settleT0 && (Date.now() - S.fx.settleT0) < 1020;
+    if (!settleOn) {
       ctx.save();
-      ctx.translate(px, py);
-      ctx.rotate(ang + p * 2.2);
-      drawSpade(ctx, 0, 0, sz, i % 2 ? '#e8b04a' : '#dfe6f0');
+      for (var i = 0; i < 12; i++) {
+        var ang = (i / 12) * Math.PI * 2 + 0.26;
+        var dist = 120 * easeOut(p) * (0.62 + ((i * 41) % 38) / 100);
+        var px = cx + Math.cos(ang) * dist;
+        var py = cy + Math.sin(ang) * dist * 0.66;
+        var sz = 15 * (1 - p * 0.55) + 3;
+        ctx.globalAlpha = Math.max(0, 0.95 - p * 0.9);
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(ang + p * 2.2);
+        drawSpade(ctx, 0, 0, sz, i % 2 ? '#e8b04a' : '#dfe6f0');
+        ctx.restore();
+      }
       ctx.restore();
     }
-    ctx.restore();
 
     // 第三幕：身份徽标自桌中央沿二次贝塞尔飞入座位徽标位（0.35-1.0）
     if (p >= 0.35) {
