@@ -101,6 +101,17 @@
     lose: function () {
       tone(392, 0.14, 0.18, 'sine');
       tone(294, 0.22, 0.16, 'sine', null, 0.14);
+    },
+    // ♠3/♠A 亮出：220Hz 正弦 0.5s 指数衰减 + 440 泛音
+    identity: function () {
+      tone(220, 0.5, 0.22, 'sine');
+      tone(440, 0.5, 0.08, 'sine');
+    },
+    // 独食揭示：低通噪声鼓点两下（间隔 0.18s）+ 高通噪声锣 0.4s
+    lone: function () {
+      noise(0.08, 480, 0.42, 'lowpass');
+      noise(0.08, 480, 0.42, 'lowpass', 0.18);
+      noise(0.4, 3400, 0.2, 'highpass', 0.36);
     }
   };
 

@@ -73,7 +73,8 @@
       (S.fx.retT0 && now - S.fx.retT0 < 360) ||
       (S.fx.seatPlay && now - S.fx.seatPlay.t0 < 470) ||
       (S.fx.identityT0 && now - S.fx.identityT0 < 1000) ||
-      (S.fx.settleT0 && now - S.fx.settleT0 < 1020)) P.markDirty();
+      (S.fx.settleT0 && now - S.fx.settleT0 < 1020) ||
+      (S.fx.loneRevealT0 && now - S.fx.loneRevealT0 < 1700)) P.markDirty();
   }
 
   // ---------- 计时 ----------
@@ -237,10 +238,32 @@
     S.fx.identityT0 = Date.now();
     S.fx.identitySeat = seat;
     S.fx.identityRank = rank;
+    SFX.play('identity');
   }
   function fxIdentityCards(cards, seat) {
     var idc = (cards || []).filter(function (c) { return c.s === 3 && (c.r === 3 || c.r === 14); });
     if (idc.length) fxIdentitySet(seat, idc[0].r);
+  }
+
+  // 独食全屏揭示触发：某座位 revealedCards 同时含 3 与 14 → loneRevealT0/loneSeat。
+  // loneRevealT0 兼任「本局已触发」守卫（S.fx 每局重置），重复检查幂等无害。
+  function fxLoneCheck() {
+    if (!S.game || !S.game.players || S.fx.loneRevealT0) return;
+    for (var i = 0; i < S.game.players.length; i++) {
+      var rc = S.game.players[i].revealedCards || [];
+      var has3 = false, hasA = false;
+      for (var j = 0; j < rc.length; j++) {
+        var v = (rc[j] && typeof rc[j] === 'object') ? rc[j].r : rc[j]; // 兼容 {r:n} 形态
+        if (v === 3) has3 = true;
+        else if (v === 14) hasA = true;
+      }
+      if (has3 && hasA) {
+        S.fx.loneRevealT0 = Date.now();
+        S.fx.loneSeat = i;
+        SFX.play('lone');
+        return;
+      }
+    }
   }
 
   // ---------- AI ----------
@@ -258,6 +281,7 @@
     SFX.playKind(k);
     S.fx.seatPlay = { p: seat, t0: Date.now() };
     fxIdentityCards(last && last.cards, seat); // 本手含 ♠3/♠A → 身份特效
+    fxLoneCheck(); // 出牌后直接判：revealedCards 齐 ♠3+♠A → 独食揭示
   }
 
   function scheduleAI() {
@@ -284,6 +308,7 @@
         SFX.play('shock');
         S.fx.seatPlay = { p: p, t0: Date.now() };
         fxIdentityCards(tl && tl.cards, p); // 与 fxPlayed 同一触发口径：♠3/♠A 亮出
+        fxLoneCheck(); // 与 fxPlayed 同一口径：独食揭示
       } else if (GX.Table.pass(S.game, p)) {
         var cands = GX.Moves.candidates(S.game.players[p].hand, S.cfg);
         var ok = cands.filter(function (c) { return GX.Table.validate(S.game, p, c.cards) === null; });
@@ -495,6 +520,7 @@
         }
       }
     }
+    fxLoneCheck(); // online 对比增量后：revealedCards 齐 ♠3+♠A → 独食揭示（幂等守卫）
 
     if (v.phase === 'play') {
       S.hint = v.turn === 0 ? (v.combo ? '轮到你，压不过可过牌' : '你起手，必须出牌') : SEAT_NAMES[v.turn] + ' 出牌中';
@@ -1196,6 +1222,8 @@
     if (typeof window !== 'undefined' && window.location &&
         /demo=identity/.test(window.location.search || '')) { demoFx(); return; }
     if (typeof window !== 'undefined' && window.location &&
+        /demo=lone/.test(window.location.search || '')) { demoFx(); return; }
+    if (typeof window !== 'undefined' && window.location &&
         /demo=fx/.test(window.location.search || '')) { demoFx(); return; }
     if (typeof window !== 'undefined' && window.location &&
         /demo=flight/.test(window.location.search || '')) { demoFlight(); return; }
@@ -1236,9 +1264,19 @@
     var km = /kind=([a-z]+)/.exec(window.location.search || '');
     var sm = /suit=([0-3])/.exec(window.location.search || '');
     var idm = /demo=identity/.exec(window.location.search || '');
+    var lom = /demo=lone/.exec(window.location.search || '');
     newMatch();
     S.fxDemoP = m ? parseFloat(m[1]) : 0.35;
     S.fxDemoKind = km ? km[1] : '';
+    // 仅预览用：?demo=lone 冻结独食揭示特效（可叠加 &seat=0..3）
+    if (lom) {
+      S.fxDemoKind = 'lone';
+      var lsm = /seat=([0-3])/.exec(window.location.search || '');
+      var lSeat = lsm ? parseInt(lsm[1], 10) : 2;
+      S.fx.loneSeat = lSeat;
+      // 让该座位同步亮出双身份牌，便于核对朱红边框/「独食」字与脉冲落点
+      if (S.game && S.game.players[lSeat]) S.game.players[lSeat].revealedCards = [3, 14];
+    }
     // 仅预览用：?demo=identity 冻结身份特效（可叠加 &seat=0..3 &rank=3|14）
     if (idm) {
       S.fxDemoKind = 'identity';

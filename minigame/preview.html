@@ -1469,6 +1469,17 @@ define("js/audio.js", function (require, module, exports) {
     lose: function () {
       tone(392, 0.14, 0.18, 'sine');
       tone(294, 0.22, 0.16, 'sine', null, 0.14);
+    },
+    // ♠3/♠A 亮出：220Hz 正弦 0.5s 指数衰减 + 440 泛音
+    identity: function () {
+      tone(220, 0.5, 0.22, 'sine');
+      tone(440, 0.5, 0.08, 'sine');
+    },
+    // 独食揭示：低通噪声鼓点两下（间隔 0.18s）+ 高通噪声锣 0.4s
+    lone: function () {
+      noise(0.08, 480, 0.42, 'lowpass');
+      noise(0.08, 480, 0.42, 'lowpass', 0.18);
+      noise(0.4, 3400, 0.2, 'highpass', 0.36);
     }
   };
 
@@ -2244,15 +2255,20 @@ define("js/views.js", function (require, module, exports) {
     ctx.restore();
   }
 
-  // 四条震屏：±6px 随机偏移，300ms 线性衰减；返回 null 表示不震
+  // 震屏：四条（出牌即震）与独食砸字（0.45×1600=720ms 起震）共用判定；±6px 随机偏移，300ms 线性衰减
   function fxShake(S) {
     var el;
     if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
-      if (S.fxDemoKind !== 'four') return null;
-      el = S.fxDemoP * 640;
+      if (S.fxDemoKind === 'lone') el = (S.fxDemoP - 0.45) * 1600;
+      else if (S.fxDemoKind === 'four') el = S.fxDemoP * 640;
+      else return null;
     } else {
-      if (!S.fx || S.fx.kind !== 'four' || !S.fx.playT0) return null;
-      el = Date.now() - S.fx.playT0;
+      if (!S.fx) return null;
+      var now = Date.now();
+      // 四条在其 300ms 窗口内优先（最新事件），独食窗口（720-1020ms）补充
+      if (S.fx.kind === 'four' && S.fx.playT0 && now - S.fx.playT0 < 300) el = now - S.fx.playT0;
+      else if (S.fx.loneRevealT0) el = now - S.fx.loneRevealT0 - 720;
+      else return null;
     }
     if (el < 0 || el >= 300) return null;
     var amp = 6 * (1 - el / 300);
@@ -2360,6 +2376,90 @@ define("js/views.js", function (require, module, exports) {
       ctx.stroke();
       ctx.restore();
       txt(ctx, '♠' + rankText(rank), bx, by + 1, Math.max(9, Math.round(bsize * 0.95)), C.gold, 'center', 600);
+    }
+  }
+
+  // 独食全屏揭示（总时长约 1600ms，两幕）：桌面压暗至 40%（全程，末 15% 淡出避免硬切）→
+  // ♠3/♠A 双牌面自两侧飞入中央合并放大至 1.6 倍（0-0.45）→
+  //「独食」朱红大字 2.2→1.0 砸下 + 震屏（见 fxShake）+ 黑红粒子爆发（0.45-1.0）。
+  // 结束后画面归零，仅剩 seatPlate 的朱红边框常驻；座位高亮脉冲只在 T3 结构之外叠加。
+  function loneRevealFx(ctx, S, L, H, p, seat) {
+    if (p >= 1) return; // 结束后：特效层清空，独食者座位朱红边框常驻
+    var cx = W / 2;
+    var cy = Math.min(L.center.y, L.hand.y - 90);
+    var fade = p > 0.85 ? Math.max(0, 1 - (p - 0.85) / 0.15) : 1;
+
+    // 全程：桌面压暗至 40%（前 20% 淡入）
+    var dimA = 0.4 * Math.min(1, p / 0.2) * fade;
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,8,16,' + dimA.toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // 第一幕（0-0.45）：♠3/♠A 自左右两侧飞入中央合并，放大至 1.6 倍；落定后保持
+    var t = easeOut(Math.min(1, p / 0.45));
+    var cw = 58 * (1 + 0.6 * t);
+    var ch = 82 * (1 + 0.6 * t);
+    var gap = cw * 0.3;
+    var x3 = -70 + (cx - gap + 70) * t;
+    var xA = W + 70 + (cx + gap - W - 70) * t;
+    var r3 = -0.55 * (1 - t) - 0.06;
+    var rA = 0.55 * (1 - t) + 0.06;
+    var cardA = Math.min(1, p / 0.08) * fade;
+    ctx.save();
+    ctx.globalAlpha = cardA;
+    ctx.save();
+    ctx.translate(x3, cy);
+    ctx.rotate(r3);
+    drawCard(ctx, -cw / 2, -ch / 2, cw, ch, { s: 3, r: 3 });
+    ctx.restore();
+    ctx.save();
+    ctx.translate(xA, cy);
+    ctx.rotate(rA);
+    drawCard(ctx, -cw / 2, -ch / 2, cw, ch, { s: 3, r: 14 });
+    ctx.restore();
+    ctx.restore();
+
+    // 第二幕（0.45-1.0）：「独食」朱红大字 2.2→1.0 砸下 + 黑红粒子爆发
+    if (p >= 0.45) {
+      var q = (p - 0.45) / 0.55;
+      var sq = easeOut(Math.min(1, q * 1.6)); // 快砸：前段完成大部分缩放
+      var size = Math.max(44, Math.round(W * 0.085));
+      var ty = cy + ch / 2 + 46;
+      // 黑红粒子爆发：13 黑 + 13 朱红 = 26 枚（预算推导见 task-7 报告）
+      burst(ctx, cx, ty, q, 13, 190, '20,24,32');
+      burst(ctx, cx, ty, q, 13, 215, '224,96,74');
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, q * 6) * fade;
+      ctx.translate(cx, ty);
+      var tscale = 2.2 - 1.2 * sq;
+      ctx.scale(tscale, tscale);
+      ctx.font = '700 ' + size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(200,69,44,0.65)';
+      ctx.shadowBlur = size * 0.3;
+      ctx.fillStyle = C.red;
+      ctx.fillText('独食', 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(40,10,8,0.8)';
+      ctx.lineWidth = Math.max(1.5, size * 0.03);
+      ctx.strokeText('独食', 0, 0);
+      ctx.restore();
+
+      // 尾声（0.55-1.0）：独食者座位朱红脉冲，衔接 seatPlate 常驻边框（纯叠加，不动 T3 结构）
+      if (typeof seat === 'number' && seat >= 0 && seat <= 3 && p > 0.55) {
+        var srect = L.seats[SEAT_POS[seat]];
+        var u = (p - 0.55) / 0.45;
+        var grow = 8 * easeOut(u);
+        ctx.save();
+        ctx.globalAlpha = 0.7 * (1 - u) * fade;
+        rr(ctx, srect.x - grow, srect.y - grow, srect.w + grow * 2, srect.h + grow * 2, 12);
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
@@ -2472,6 +2572,10 @@ define("js/views.js", function (require, module, exports) {
         identityFx(ctx, S, L, dp, S.fx && S.fx.identitySeat, S.fx && S.fx.identityRank);
         return;
       }
+      if (S.fxDemoKind === 'lone') {
+        loneRevealFx(ctx, S, L, H, dp, S.fx && S.fx.loneSeat);
+        return;
+      }
       if (S.fxDemoKind) {
         kindFx(ctx, S, L, H, S.fxDemoKind, dp, S.fx && S.fx.cards);
         return;
@@ -2507,6 +2611,10 @@ define("js/views.js", function (require, module, exports) {
     if (S.fx.identityT0) {
       var p5 = (now - S.fx.identityT0) / 1000;
       if (p5 >= 0 && p5 < 1) identityFx(ctx, S, L, p5, S.fx.identitySeat, S.fx.identityRank);
+    }
+    if (S.fx.loneRevealT0) {
+      var p6 = (now - S.fx.loneRevealT0) / 1600;
+      if (p6 >= 0 && p6 < 1) loneRevealFx(ctx, S, L, H, p6, S.fx.loneSeat);
     }
   }
 
@@ -3607,7 +3715,8 @@ define("js/app.js", function (require, module, exports) {
       (S.fx.retT0 && now - S.fx.retT0 < 360) ||
       (S.fx.seatPlay && now - S.fx.seatPlay.t0 < 470) ||
       (S.fx.identityT0 && now - S.fx.identityT0 < 1000) ||
-      (S.fx.settleT0 && now - S.fx.settleT0 < 1020)) P.markDirty();
+      (S.fx.settleT0 && now - S.fx.settleT0 < 1020) ||
+      (S.fx.loneRevealT0 && now - S.fx.loneRevealT0 < 1700)) P.markDirty();
   }
 
   // ---------- 计时 ----------
@@ -3771,10 +3880,32 @@ define("js/app.js", function (require, module, exports) {
     S.fx.identityT0 = Date.now();
     S.fx.identitySeat = seat;
     S.fx.identityRank = rank;
+    SFX.play('identity');
   }
   function fxIdentityCards(cards, seat) {
     var idc = (cards || []).filter(function (c) { return c.s === 3 && (c.r === 3 || c.r === 14); });
     if (idc.length) fxIdentitySet(seat, idc[0].r);
+  }
+
+  // 独食全屏揭示触发：某座位 revealedCards 同时含 3 与 14 → loneRevealT0/loneSeat。
+  // loneRevealT0 兼任「本局已触发」守卫（S.fx 每局重置），重复检查幂等无害。
+  function fxLoneCheck() {
+    if (!S.game || !S.game.players || S.fx.loneRevealT0) return;
+    for (var i = 0; i < S.game.players.length; i++) {
+      var rc = S.game.players[i].revealedCards || [];
+      var has3 = false, hasA = false;
+      for (var j = 0; j < rc.length; j++) {
+        var v = (rc[j] && typeof rc[j] === 'object') ? rc[j].r : rc[j]; // 兼容 {r:n} 形态
+        if (v === 3) has3 = true;
+        else if (v === 14) hasA = true;
+      }
+      if (has3 && hasA) {
+        S.fx.loneRevealT0 = Date.now();
+        S.fx.loneSeat = i;
+        SFX.play('lone');
+        return;
+      }
+    }
   }
 
   // ---------- AI ----------
@@ -3792,6 +3923,7 @@ define("js/app.js", function (require, module, exports) {
     SFX.playKind(k);
     S.fx.seatPlay = { p: seat, t0: Date.now() };
     fxIdentityCards(last && last.cards, seat); // 本手含 ♠3/♠A → 身份特效
+    fxLoneCheck(); // 出牌后直接判：revealedCards 齐 ♠3+♠A → 独食揭示
   }
 
   function scheduleAI() {
@@ -3818,6 +3950,7 @@ define("js/app.js", function (require, module, exports) {
         SFX.play('shock');
         S.fx.seatPlay = { p: p, t0: Date.now() };
         fxIdentityCards(tl && tl.cards, p); // 与 fxPlayed 同一触发口径：♠3/♠A 亮出
+        fxLoneCheck(); // 与 fxPlayed 同一口径：独食揭示
       } else if (GX.Table.pass(S.game, p)) {
         var cands = GX.Moves.candidates(S.game.players[p].hand, S.cfg);
         var ok = cands.filter(function (c) { return GX.Table.validate(S.game, p, c.cards) === null; });
@@ -4029,6 +4162,7 @@ define("js/app.js", function (require, module, exports) {
         }
       }
     }
+    fxLoneCheck(); // online 对比增量后：revealedCards 齐 ♠3+♠A → 独食揭示（幂等守卫）
 
     if (v.phase === 'play') {
       S.hint = v.turn === 0 ? (v.combo ? '轮到你，压不过可过牌' : '你起手，必须出牌') : SEAT_NAMES[v.turn] + ' 出牌中';
@@ -4730,6 +4864,8 @@ define("js/app.js", function (require, module, exports) {
     if (typeof window !== 'undefined' && window.location &&
         /demo=identity/.test(window.location.search || '')) { demoFx(); return; }
     if (typeof window !== 'undefined' && window.location &&
+        /demo=lone/.test(window.location.search || '')) { demoFx(); return; }
+    if (typeof window !== 'undefined' && window.location &&
         /demo=fx/.test(window.location.search || '')) { demoFx(); return; }
     if (typeof window !== 'undefined' && window.location &&
         /demo=flight/.test(window.location.search || '')) { demoFlight(); return; }
@@ -4770,9 +4906,19 @@ define("js/app.js", function (require, module, exports) {
     var km = /kind=([a-z]+)/.exec(window.location.search || '');
     var sm = /suit=([0-3])/.exec(window.location.search || '');
     var idm = /demo=identity/.exec(window.location.search || '');
+    var lom = /demo=lone/.exec(window.location.search || '');
     newMatch();
     S.fxDemoP = m ? parseFloat(m[1]) : 0.35;
     S.fxDemoKind = km ? km[1] : '';
+    // 仅预览用：?demo=lone 冻结独食揭示特效（可叠加 &seat=0..3）
+    if (lom) {
+      S.fxDemoKind = 'lone';
+      var lsm = /seat=([0-3])/.exec(window.location.search || '');
+      var lSeat = lsm ? parseInt(lsm[1], 10) : 2;
+      S.fx.loneSeat = lSeat;
+      // 让该座位同步亮出双身份牌，便于核对朱红边框/「独食」字与脉冲落点
+      if (S.game && S.game.players[lSeat]) S.game.players[lSeat].revealedCards = [3, 14];
+    }
     // 仅预览用：?demo=identity 冻结身份特效（可叠加 &seat=0..3 &rank=3|14）
     if (idm) {
       S.fxDemoKind = 'identity';

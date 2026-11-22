@@ -324,15 +324,20 @@
     ctx.restore();
   }
 
-  // 四条震屏：±6px 随机偏移，300ms 线性衰减；返回 null 表示不震
+  // 震屏：四条（出牌即震）与独食砸字（0.45×1600=720ms 起震）共用判定；±6px 随机偏移，300ms 线性衰减
   function fxShake(S) {
     var el;
     if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
-      if (S.fxDemoKind !== 'four') return null;
-      el = S.fxDemoP * 640;
+      if (S.fxDemoKind === 'lone') el = (S.fxDemoP - 0.45) * 1600;
+      else if (S.fxDemoKind === 'four') el = S.fxDemoP * 640;
+      else return null;
     } else {
-      if (!S.fx || S.fx.kind !== 'four' || !S.fx.playT0) return null;
-      el = Date.now() - S.fx.playT0;
+      if (!S.fx) return null;
+      var now = Date.now();
+      // 四条在其 300ms 窗口内优先（最新事件），独食窗口（720-1020ms）补充
+      if (S.fx.kind === 'four' && S.fx.playT0 && now - S.fx.playT0 < 300) el = now - S.fx.playT0;
+      else if (S.fx.loneRevealT0) el = now - S.fx.loneRevealT0 - 720;
+      else return null;
     }
     if (el < 0 || el >= 300) return null;
     var amp = 6 * (1 - el / 300);
@@ -440,6 +445,90 @@
       ctx.stroke();
       ctx.restore();
       txt(ctx, '♠' + rankText(rank), bx, by + 1, Math.max(9, Math.round(bsize * 0.95)), C.gold, 'center', 600);
+    }
+  }
+
+  // 独食全屏揭示（总时长约 1600ms，两幕）：桌面压暗至 40%（全程，末 15% 淡出避免硬切）→
+  // ♠3/♠A 双牌面自两侧飞入中央合并放大至 1.6 倍（0-0.45）→
+  //「独食」朱红大字 2.2→1.0 砸下 + 震屏（见 fxShake）+ 黑红粒子爆发（0.45-1.0）。
+  // 结束后画面归零，仅剩 seatPlate 的朱红边框常驻；座位高亮脉冲只在 T3 结构之外叠加。
+  function loneRevealFx(ctx, S, L, H, p, seat) {
+    if (p >= 1) return; // 结束后：特效层清空，独食者座位朱红边框常驻
+    var cx = W / 2;
+    var cy = Math.min(L.center.y, L.hand.y - 90);
+    var fade = p > 0.85 ? Math.max(0, 1 - (p - 0.85) / 0.15) : 1;
+
+    // 全程：桌面压暗至 40%（前 20% 淡入）
+    var dimA = 0.4 * Math.min(1, p / 0.2) * fade;
+    ctx.save();
+    ctx.fillStyle = 'rgba(4,8,16,' + dimA.toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // 第一幕（0-0.45）：♠3/♠A 自左右两侧飞入中央合并，放大至 1.6 倍；落定后保持
+    var t = easeOut(Math.min(1, p / 0.45));
+    var cw = 58 * (1 + 0.6 * t);
+    var ch = 82 * (1 + 0.6 * t);
+    var gap = cw * 0.3;
+    var x3 = -70 + (cx - gap + 70) * t;
+    var xA = W + 70 + (cx + gap - W - 70) * t;
+    var r3 = -0.55 * (1 - t) - 0.06;
+    var rA = 0.55 * (1 - t) + 0.06;
+    var cardA = Math.min(1, p / 0.08) * fade;
+    ctx.save();
+    ctx.globalAlpha = cardA;
+    ctx.save();
+    ctx.translate(x3, cy);
+    ctx.rotate(r3);
+    drawCard(ctx, -cw / 2, -ch / 2, cw, ch, { s: 3, r: 3 });
+    ctx.restore();
+    ctx.save();
+    ctx.translate(xA, cy);
+    ctx.rotate(rA);
+    drawCard(ctx, -cw / 2, -ch / 2, cw, ch, { s: 3, r: 14 });
+    ctx.restore();
+    ctx.restore();
+
+    // 第二幕（0.45-1.0）：「独食」朱红大字 2.2→1.0 砸下 + 黑红粒子爆发
+    if (p >= 0.45) {
+      var q = (p - 0.45) / 0.55;
+      var sq = easeOut(Math.min(1, q * 1.6)); // 快砸：前段完成大部分缩放
+      var size = Math.max(44, Math.round(W * 0.085));
+      var ty = cy + ch / 2 + 46;
+      // 黑红粒子爆发：13 黑 + 13 朱红 = 26 枚（预算推导见 task-7 报告）
+      burst(ctx, cx, ty, q, 13, 190, '20,24,32');
+      burst(ctx, cx, ty, q, 13, 215, '224,96,74');
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, q * 6) * fade;
+      ctx.translate(cx, ty);
+      var tscale = 2.2 - 1.2 * sq;
+      ctx.scale(tscale, tscale);
+      ctx.font = '700 ' + size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(200,69,44,0.65)';
+      ctx.shadowBlur = size * 0.3;
+      ctx.fillStyle = C.red;
+      ctx.fillText('独食', 0, 0);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(40,10,8,0.8)';
+      ctx.lineWidth = Math.max(1.5, size * 0.03);
+      ctx.strokeText('独食', 0, 0);
+      ctx.restore();
+
+      // 尾声（0.55-1.0）：独食者座位朱红脉冲，衔接 seatPlate 常驻边框（纯叠加，不动 T3 结构）
+      if (typeof seat === 'number' && seat >= 0 && seat <= 3 && p > 0.55) {
+        var srect = L.seats[SEAT_POS[seat]];
+        var u = (p - 0.55) / 0.45;
+        var grow = 8 * easeOut(u);
+        ctx.save();
+        ctx.globalAlpha = 0.7 * (1 - u) * fade;
+        rr(ctx, srect.x - grow, srect.y - grow, srect.w + grow * 2, srect.h + grow * 2, 12);
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.restore();
+      }
     }
   }
 
@@ -552,6 +641,10 @@
         identityFx(ctx, S, L, dp, S.fx && S.fx.identitySeat, S.fx && S.fx.identityRank);
         return;
       }
+      if (S.fxDemoKind === 'lone') {
+        loneRevealFx(ctx, S, L, H, dp, S.fx && S.fx.loneSeat);
+        return;
+      }
       if (S.fxDemoKind) {
         kindFx(ctx, S, L, H, S.fxDemoKind, dp, S.fx && S.fx.cards);
         return;
@@ -587,6 +680,10 @@
     if (S.fx.identityT0) {
       var p5 = (now - S.fx.identityT0) / 1000;
       if (p5 >= 0 && p5 < 1) identityFx(ctx, S, L, p5, S.fx.identitySeat, S.fx.identityRank);
+    }
+    if (S.fx.loneRevealT0) {
+      var p6 = (now - S.fx.loneRevealT0) / 1600;
+      if (p6 >= 0 && p6 < 1) loneRevealFx(ctx, S, L, H, p6, S.fx.loneSeat);
     }
   }
 
