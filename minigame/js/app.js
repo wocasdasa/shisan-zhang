@@ -72,6 +72,7 @@
       (S.fx.drawT0 && now - S.fx.drawT0 < 400) ||
       (S.fx.retT0 && now - S.fx.retT0 < 360) ||
       (S.fx.seatPlay && now - S.fx.seatPlay.t0 < 470) ||
+      (S.fx.identityT0 && now - S.fx.identityT0 < 1000) ||
       (S.fx.settleT0 && now - S.fx.settleT0 < 1020)) P.markDirty();
   }
 
@@ -231,6 +232,17 @@
     return map[code] || '出牌不合法';
   }
 
+  // 身份牌（♠3/♠A）亮出特效：在既有 S.fx 体系上追加字段，不改 kindFx 任何签名与记录逻辑
+  function fxIdentitySet(seat, rank) {
+    S.fx.identityT0 = Date.now();
+    S.fx.identitySeat = seat;
+    S.fx.identityRank = rank;
+  }
+  function fxIdentityCards(cards, seat) {
+    var idc = (cards || []).filter(function (c) { return c.s === 3 && (c.r === 3 || c.r === 14); });
+    if (idc.length) fxIdentitySet(seat, idc[0].r);
+  }
+
   // ---------- AI ----------
   // 出牌瞬间：按牌型触发不同特效/音效
   function fxPlayed(g, seat) {
@@ -245,6 +257,7 @@
     SFX.play('shock');
     SFX.playKind(k);
     S.fx.seatPlay = { p: seat, t0: Date.now() };
+    fxIdentityCards(last && last.cards, seat); // 本手含 ♠3/♠A → 身份特效
   }
 
   function scheduleAI() {
@@ -270,6 +283,7 @@
         S.fx.cards = (tl && tl.cards) || null;
         SFX.play('shock');
         S.fx.seatPlay = { p: p, t0: Date.now() };
+        fxIdentityCards(tl && tl.cards, p); // 与 fxPlayed 同一触发口径：♠3/♠A 亮出
       } else if (GX.Table.pass(S.game, p)) {
         var cands = GX.Moves.candidates(S.game.players[p].hand, S.cfg);
         var ok = cands.filter(function (c) { return GX.Table.validate(S.game, p, c.cards) === null; });
@@ -429,6 +443,11 @@
     S.waitRoom = v.phase === 'wait';
     S.summary = v.phase === 'summary';
 
+    // 记录旧 revealedCards 长度：state 更新后对比增量，触发身份特效（♠3/♠A 亮出）
+    var prevRc = (S.game && S.game.players) ? S.game.players.map(function (pl) {
+      return (pl.revealedCards || []).length;
+    }) : null;
+
     var players = S.seats.map(function (s, i) {
       return {
         hand: i === 0 ? sortHand(v.hand || []) : new Array(s.count || 0),
@@ -464,6 +483,18 @@
       fxPlayed(S.game, last.player);
     }
     S.prevPlays = v.phase === 'play' ? plays : 0;
+
+    // 身份牌增量：新亮出的 ♠3/♠A（revealedCards 只记录身份牌点数）触发同组 fx 字段
+    if (prevRc && S.game) {
+      for (var pi = 0; pi < S.game.players.length; pi++) {
+        var nrc = S.game.players[pi].revealedCards || [];
+        for (var di = (prevRc[pi] || 0); di < nrc.length; di++) {
+          var rv = nrc[di];
+          if (rv && typeof rv === 'object') rv = rv.r; // 兼容 {r:n} 形态
+          if (rv === 3 || rv === 14) fxIdentitySet(pi, rv);
+        }
+      }
+    }
 
     if (v.phase === 'play') {
       S.hint = v.turn === 0 ? (v.combo ? '轮到你，压不过可过牌' : '你起手，必须出牌') : SEAT_NAMES[v.turn] + ' 出牌中';
@@ -1163,6 +1194,8 @@
     if (typeof window !== 'undefined' && window.location &&
         /demo=tribute/.test(window.location.search || '')) { demoTribute(); return; }
     if (typeof window !== 'undefined' && window.location &&
+        /demo=identity/.test(window.location.search || '')) { demoFx(); return; }
+    if (typeof window !== 'undefined' && window.location &&
         /demo=fx/.test(window.location.search || '')) { demoFx(); return; }
     if (typeof window !== 'undefined' && window.location &&
         /demo=flight/.test(window.location.search || '')) { demoFlight(); return; }
@@ -1202,9 +1235,22 @@
     var m = /fx=([0-9.]+)/.exec(window.location.search || '');
     var km = /kind=([a-z]+)/.exec(window.location.search || '');
     var sm = /suit=([0-3])/.exec(window.location.search || '');
+    var idm = /demo=identity/.exec(window.location.search || '');
     newMatch();
     S.fxDemoP = m ? parseFloat(m[1]) : 0.35;
     S.fxDemoKind = km ? km[1] : '';
+    // 仅预览用：?demo=identity 冻结身份特效（可叠加 &seat=0..3 &rank=3|14）
+    if (idm) {
+      S.fxDemoKind = 'identity';
+      var stm = /seat=([0-3])/.exec(window.location.search || '');
+      var rkm = /rank=(3|14)/.exec(window.location.search || '');
+      var dSeat = stm ? parseInt(stm[1], 10) : 2;
+      var dRank = rkm ? parseInt(rkm[1], 10) : 3;
+      S.fx.identitySeat = dSeat;
+      S.fx.identityRank = dRank;
+      // 让座位牌同步亮出该身份徽标，便于核对徽标落点吻合
+      if (S.game && S.game.players[dSeat]) S.game.players[dSeat].revealedCards = [dRank];
+    }
     // 仅预览用：?suit=0..3 给同花着色验证提供该花色 5 张样例牌
     if (sm) S.fx.cards = [5, 7, 9, 11, 13].map(function (r) { return { s: parseInt(sm[1], 10), r: r }; });
     P.markDirty();

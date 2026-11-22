@@ -339,6 +339,105 @@
     return { x: (Math.random() * 2 - 1) * amp, y: (Math.random() * 2 - 1) * amp };
   }
 
+  // Canvas 路径画 ♠（x,y 为中心，size 为总高）
+  function drawSpade(ctx, x, y, size, fill) {
+    var s = size;
+    ctx.save();
+    ctx.fillStyle = fill || '#f2ead8';
+    ctx.beginPath();
+    ctx.moveTo(x, y - s * 0.5);
+    ctx.bezierCurveTo(x - s * 0.58, y - s * 0.10, x - s * 0.52, y + s * 0.28, x - s * 0.16, y + s * 0.28);
+    ctx.bezierCurveTo(x - s * 0.07, y + s * 0.28, x - s * 0.02, y + s * 0.22, x, y + s * 0.13);
+    ctx.bezierCurveTo(x + s * 0.02, y + s * 0.22, x + s * 0.07, y + s * 0.28, x + s * 0.16, y + s * 0.28);
+    ctx.bezierCurveTo(x + s * 0.52, y + s * 0.28, x + s * 0.58, y - s * 0.10, x, y - s * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    // 茎：向上收窄的三角
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.12, y + s * 0.52);
+    ctx.lineTo(x, y + s * 0.10);
+    ctx.lineTo(x + s * 0.12, y + s * 0.52);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ♠3/♠A 身份特效（三幕）：落点黑金光柱(0-0.2) → 12 枚 ♠ 粒子炸开(全程) →
+  // 身份徽标（黑金圆章，内嵌 ♠3/♠A）自桌中央沿二次贝塞尔飞入 L.seats[seat]（0.35-1.0）。
+  // 徽标落点与 seatPlate 的身份徽标公式一致（br=12，南家在牌上方、其余在牌下方）。
+  function identityFx(ctx, S, L, p, seat, rank) {
+    if (typeof seat !== 'number' || seat < 0 || seat > 3) seat = 2;
+    if (rank !== 3 && rank !== 14) rank = 3;
+    var cx = W / 2;
+    var cy = Math.min(L.center.y, L.hand.y - 90);
+    var rect = L.seats[SEAT_POS[seat]];
+    var br = 12;
+    var rc = (S.game && S.game.players[seat] && S.game.players[seat].revealedCards) || [rank];
+    var bn = rc.length;
+    var bi = rc.indexOf(rank);
+    if (bi < 0) bi = bn - 1;
+    var tx = rect.x + rect.w / 2 + (bi - (bn - 1) / 2) * (br * 2 + 6);
+    var ty = (seat === 0) ? rect.y - br - 2 : rect.y + rect.h + br + 2;
+
+    // 第一幕：落点黑金光柱（0-0.2，余光至 0.24）
+    if (p < 0.24) {
+      var t1 = Math.min(1, p / 0.2);
+      var a1 = p <= 0.2 ? easeOut(t1) : Math.max(0, 1 - (p - 0.2) / 0.04);
+      var gTop = L.table.top + 6;
+      var gBot = Math.min(L.hand.y - 40, L.table.bottom);
+      ctx.save();
+      ctx.globalAlpha = 0.85 * a1;
+      var grad = ctx.createLinearGradient(0, gTop, 0, gBot);
+      grad.addColorStop(0, 'rgba(216,179,106,0)');
+      grad.addColorStop(0.5, 'rgba(255,224,150,0.9)');
+      grad.addColorStop(1, 'rgba(216,179,106,0)');
+      ctx.fillStyle = grad;
+      var pw = 26 * (0.4 + 0.6 * easeOut(t1));
+      ctx.fillRect(cx - pw / 2, gTop, pw, gBot - gTop);
+      ctx.restore();
+      ring(ctx, cx, cy, 90, t1, '216,179,106');
+    }
+
+    // 第二幕：12 枚 ♠ 粒子自落点炸开（全程，金/银交替）
+    ctx.save();
+    for (var i = 0; i < 12; i++) {
+      var ang = (i / 12) * Math.PI * 2 + 0.26;
+      var dist = 120 * easeOut(p) * (0.62 + ((i * 41) % 38) / 100);
+      var px = cx + Math.cos(ang) * dist;
+      var py = cy + Math.sin(ang) * dist * 0.66;
+      var sz = 15 * (1 - p * 0.55) + 3;
+      ctx.globalAlpha = Math.max(0, 0.95 - p * 0.9);
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(ang + p * 2.2);
+      drawSpade(ctx, 0, 0, sz, i % 2 ? '#e8b04a' : '#dfe6f0');
+      ctx.restore();
+    }
+    ctx.restore();
+
+    // 第三幕：身份徽标自桌中央沿二次贝塞尔飞入座位徽标位（0.35-1.0）
+    if (p >= 0.35) {
+      var t3 = easeOut(Math.min(1, (p - 0.35) / 0.65));
+      var mx = (cx + tx) / 2;
+      var my = Math.min(cy, ty) - 90;
+      var bx = (1 - t3) * (1 - t3) * cx + 2 * (1 - t3) * t3 * mx + t3 * t3 * tx;
+      var by = (1 - t3) * (1 - t3) * cy + 2 * (1 - t3) * t3 * my + t3 * t3 * ty;
+      var bsize = 26 - 14 * t3; // 26 → 12，与座位身份徽标半径吻合
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,214,120,0.6)';
+      ctx.shadowBlur = 12 * (1 - t3) + 3;
+      ctx.beginPath();
+      ctx.arc(bx, by, bsize, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(8,12,22,0.95)';
+      ctx.fill();
+      ctx.strokeStyle = C.gold;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+      txt(ctx, '♠' + rankText(rank), bx, by + 1, Math.max(9, Math.round(bsize * 0.95)), C.gold, 'center', 600);
+    }
+  }
+
   // 牌型专属特效：环数、色带、闪光按牌型递进；非单张叠加横幅；cards 为该手牌数组（供同花着色）
   function kindFx(ctx, S, L, H, k, p, cards) {
     var cx = W / 2;
@@ -444,6 +543,10 @@
   function fxOverlay(ctx, S, L, H) {
     if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
       var dp = S.fxDemoP;
+      if (S.fxDemoKind === 'identity') {
+        identityFx(ctx, S, L, dp, S.fx && S.fx.identitySeat, S.fx && S.fx.identityRank);
+        return;
+      }
       if (S.fxDemoKind) {
         kindFx(ctx, S, L, H, S.fxDemoKind, dp, S.fx && S.fx.cards);
         return;
@@ -475,6 +578,10 @@
     if (S.fx.settleT0) {
       var p4 = (now - S.fx.settleT0) / 1000;
       if (p4 >= 0 && p4 < 1) confetti(ctx, S, p4, H);
+    }
+    if (S.fx.identityT0) {
+      var p5 = (now - S.fx.identityT0) / 1000;
+      if (p5 >= 0 && p5 < 1) identityFx(ctx, S, L, p5, S.fx.identitySeat, S.fx.identityRank);
     }
   }
 
