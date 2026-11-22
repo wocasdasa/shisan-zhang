@@ -241,6 +241,7 @@
     S.fx.playT0 = Date.now();
     S.fx.shockT0 = Date.now();
     S.fx.kind = k;
+    S.fx.cards = (last && last.cards) || null; // 记录该手牌数组：kindFx 同花按实际花色着色
     SFX.play('shock');
     SFX.playKind(k);
     S.fx.seatPlay = { p: seat, t0: Date.now() };
@@ -262,6 +263,11 @@
         S.hint = '';
         S.fx.playT0 = Date.now();
         S.fx.shockT0 = Date.now();
+        // 与 fxPlayed 同一记录机制：同步该手牌型与牌面，避免横幅/同花着色沿用手上一手
+        var tps = S.game.trickPlays || [];
+        var tl = tps.length ? tps[tps.length - 1] : null;
+        S.fx.kind = (tl && tl.combo && tl.combo.kind) || 'single';
+        S.fx.cards = (tl && tl.cards) || null;
         SFX.play('shock');
         S.fx.seatPlay = { p: p, t0: Date.now() };
       } else if (GX.Table.pass(S.game, p)) {
@@ -1195,9 +1201,12 @@
   function demoFx() {
     var m = /fx=([0-9.]+)/.exec(window.location.search || '');
     var km = /kind=([a-z]+)/.exec(window.location.search || '');
+    var sm = /suit=([0-3])/.exec(window.location.search || '');
     newMatch();
     S.fxDemoP = m ? parseFloat(m[1]) : 0.35;
     S.fxDemoKind = km ? km[1] : '';
+    // 仅预览用：?suit=0..3 给同花着色验证提供该花色 5 张样例牌
+    if (sm) S.fx.cards = [5, 7, 9, 11, 13].map(function (r) { return { s: parseInt(sm[1], 10), r: r }; });
     P.markDirty();
   }
 

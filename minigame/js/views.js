@@ -1,6 +1,7 @@
 // 画布视图：把牌桌状态画到 canvas 上，同时产出可点击热区
 (function () {
   var W = 750;
+  var lastH = 0; // draw() 记录画布高，供 banner() 定位（其签名不含 H）
   var C = {
     bg0: '#0a121f',
     bg1: '#16273f',
@@ -131,7 +132,7 @@
     g.addColorStop(0.45, C.felt);
     g.addColorStop(1, C.bg0);
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-12, -12, W + 24, H + 24); // 外扩 12px：四条震屏 translate 时不露白边
 
     // 牌桌内框
     var landscape = (W / H) >= 1.2;
@@ -272,8 +273,74 @@
     ctx.restore();
   }
 
-  // 牌型专属特效：环数、色带、闪光按牌型递进
-  function kindFx(ctx, S, L, H, k, p) {
+  // 同花粒子颜色：按该手牌实际花色（♠ 银白 / ♥ 朱红 / ♣ 翠绿 / ♦ 鎏金）
+  var FLUSH_RGB = { 0: '255,216,140', 1: '90,200,140', 2: '224,90,70', 3: '226,232,240' };
+
+  function flushRgb(cards) {
+    if (cards && cards.length && cards[0] && FLUSH_RGB[cards[0].s]) return FLUSH_RGB[cards[0].s];
+    return '150,220,255'; // 无牌面信息（如 demo 未指定 suit）时的兜底色
+  }
+
+  // 牌型横幅：居中偏上金色立体字，缩放 0.6→1.1→1.0 弹入（前 30%），停留，末段上移淡出
+  function banner(ctx, text, p) {
+    var s = 1, a = 1, dy = 0;
+    if (p < 0.3) {
+      var t = p / 0.3;
+      s = t < 0.6 ? 0.6 + 0.5 * easeOut(t / 0.6) : 1.1 - 0.1 * easeOut((t - 0.6) / 0.4);
+      a = Math.min(1, t * 4);
+    } else if (p > 0.7) {
+      var u = easeOut((p - 0.7) / 0.3);
+      dy = -44 * u;
+      a = 1 - u;
+    }
+    if (a <= 0) return;
+    var size = Math.max(30, Math.round(W * 0.058));
+    var cy = Math.round((lastH || 640) * 0.30) + dy;
+    ctx.save();
+    ctx.translate(W / 2, cy);
+    ctx.scale(s, s);
+    ctx.globalAlpha = Math.max(0, Math.min(1, a));
+    ctx.font = '700 ' + size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // 立体纵深：两层深色偏移垫底
+    ctx.fillStyle = 'rgba(72,46,14,0.85)';
+    ctx.fillText(text, 0, size * 0.10);
+    ctx.fillStyle = 'rgba(122,82,28,0.9)';
+    ctx.fillText(text, 0, size * 0.05);
+    // 金色渐变正面 + 微辉光
+    var g = ctx.createLinearGradient(0, -size * 0.55, 0, size * 0.55);
+    g.addColorStop(0, '#fff6cc');
+    g.addColorStop(0.45, '#ffd873');
+    g.addColorStop(1, '#d9a441');
+    ctx.fillStyle = g;
+    ctx.shadowColor = 'rgba(255,214,120,0.55)';
+    ctx.shadowBlur = size * 0.28;
+    ctx.fillText(text, 0, 0);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(96,62,16,0.65)';
+    ctx.lineWidth = Math.max(1, size * 0.028);
+    ctx.strokeText(text, 0, 0);
+    ctx.restore();
+  }
+
+  // 四条震屏：±6px 随机偏移，300ms 线性衰减；返回 null 表示不震
+  function fxShake(S) {
+    var el;
+    if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
+      if (S.fxDemoKind !== 'four') return null;
+      el = S.fxDemoP * 640;
+    } else {
+      if (!S.fx || S.fx.kind !== 'four' || !S.fx.playT0) return null;
+      el = Date.now() - S.fx.playT0;
+    }
+    if (el < 0 || el >= 300) return null;
+    var amp = 6 * (1 - el / 300);
+    return { x: (Math.random() * 2 - 1) * amp, y: (Math.random() * 2 - 1) * amp };
+  }
+
+  // 牌型专属特效：环数、色带、闪光按牌型递进；非单张叠加横幅；cards 为该手牌数组（供同花着色）
+  function kindFx(ctx, S, L, H, k, p, cards) {
     var cx = W / 2;
     var cy = Math.min(L.center.y, L.hand.y - 90);
     var fade = Math.max(0, 1 - p);
@@ -285,29 +352,54 @@
       ring(ctx, cx, cy, 128, Math.min(1, p + 0.18), '255,178,96');
       ring(ctx, cx, cy, 152, Math.min(1, p + 0.34), '255,226,170');
     } else if (k === 'straight') {
-      for (var i = 0; i < 5; i++) {
+      // 流线 7 条，首尾加辉光点
+      for (var i = 0; i < 7; i++) {
         var d = easeOut(Math.min(1, Math.max(0, p * 1.4 - i * 0.08)));
+        var ly = cy + (i - 3) * 13;
+        var bw = 120 + d * 200;
         ctx.save();
         ctx.globalAlpha = 0.55 * fade;
         ctx.strokeStyle = 'rgba(160,214,255,0.9)';
         ctx.lineWidth = 2;
-        var bw = 120 + d * 200;
         ctx.beginPath();
-        ctx.moveTo(cx - bw / 2, cy + (i - 2) * 13);
-        ctx.lineTo(cx + bw / 2, cy + (i - 2) * 13);
+        ctx.moveTo(cx - bw / 2, ly);
+        ctx.lineTo(cx + bw / 2, ly);
         ctx.stroke();
         ctx.restore();
+        if (d > 0.05) {
+          ctx.save();
+          ctx.globalAlpha = 0.85 * fade;
+          ctx.fillStyle = 'rgba(216,240,255,1)';
+          ctx.shadowColor = 'rgba(160,214,255,0.95)';
+          ctx.shadowBlur = 9;
+          var gr = 2.2 + 1.6 * d;
+          ctx.beginPath(); ctx.arc(cx - bw / 2, ly, gr, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx + bw / 2, ly, gr, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+        }
       }
       burst(ctx, cx, cy, p, 16, 150, '160,214,255');
     } else if (k === 'flush') {
-      ring(ctx, cx, cy, 110, Math.min(1, p), '150,220,255');
-      ring(ctx, cx, cy, 140, Math.min(1, p + 0.22), '190,235,255');
-      burst(ctx, cx, cy, p, 20, 168, '150,220,255');
+      // 粒子按该手牌实际花色着色
+      var frgb = flushRgb(cards);
+      ring(ctx, cx, cy, 110, Math.min(1, p), frgb);
+      ring(ctx, cx, cy, 140, Math.min(1, p + 0.22), frgb);
+      burst(ctx, cx, cy, p, 20, 168, frgb);
     } else if (k === 'fullhouse') {
       ring(ctx, cx, cy, 112, Math.min(1, p), '214,168,255');
       ring(ctx, cx, cy, 138, Math.min(1, p + 0.2), '255,214,128');
       burst(ctx, cx, cy, p, 22, 172, '224,190,255');
     } else if (k === 'four') {
+      // 粗冲击波环（震屏在 draw() 层做，见 fxShake）
+      ctx.save();
+      var sq = easeOut(Math.min(1, p * 1.2));
+      ctx.globalAlpha = Math.max(0, 0.8 * (1 - p));
+      ctx.strokeStyle = 'rgb(255,196,128)';
+      ctx.lineWidth = 11 * (1 - p) + 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 40 + sq * Math.max(W, H) * 0.42, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
       ring(ctx, cx, cy, 150, Math.min(1, p * 0.9), '255,150,110');
       ring(ctx, cx, cy, 108, Math.min(1, p * 0.9 + 0.25), '255,214,128');
       burst(ctx, cx, cy, p, 30, 210, '255,164,120');
@@ -322,6 +414,19 @@
         ring(ctx, cx, cy, 96 + j * 20, Math.min(1, p + j * 0.09), cols[j]);
       }
       burst(ctx, cx, cy, p, 34, 240, '255,240,200');
+      // 满屏流光：线性渐变带从左到右扫过，400ms
+      var sp = Math.min(1, p * 640 / 400);
+      var band = Math.max(60, W * 0.22);
+      var sx = -band + (W + band * 2) * sp;
+      var grad = ctx.createLinearGradient(sx - band, 0, sx + band, 0);
+      grad.addColorStop(0, 'rgba(255,244,196,0)');
+      grad.addColorStop(0.5, 'rgba(255,244,196,0.5)');
+      grad.addColorStop(1, 'rgba(255,244,196,0)');
+      ctx.save();
+      ctx.globalAlpha = 0.85 * (1 - sp * 0.35);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
       ctx.save();
       ctx.globalAlpha = Math.max(0, 0.46 * (1 - p * 2));
       ctx.fillStyle = '#fff1c9';
@@ -331,13 +436,16 @@
       ring(ctx, cx, cy, 120, Math.min(1, p), '255,216,140');
       burst(ctx, cx, cy, p, 18, 132, '255,216,140');
     }
+    // 非单张牌型叠加横幅（label !== k 兜底未知牌型不显示原文）
+    var label = kindLabel(k);
+    if (k && k !== 'single' && label !== k) banner(ctx, label, p);
   }
 
   function fxOverlay(ctx, S, L, H) {
     if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
       var dp = S.fxDemoP;
       if (S.fxDemoKind) {
-        kindFx(ctx, S, L, H, S.fxDemoKind, dp);
+        kindFx(ctx, S, L, H, S.fxDemoKind, dp, S.fx && S.fx.cards);
         return;
       }
       var dcy = Math.min(L.center.y, L.hand.y - 90);
@@ -354,7 +462,7 @@
 
     if (S.fx.playT0) {
       var pk = (now - S.fx.playT0) / 640;
-      if (pk >= 0 && pk < 1) kindFx(ctx, S, L, H, S.fx.kind || 'single', pk);
+      if (pk >= 0 && pk < 1) kindFx(ctx, S, L, H, S.fx.kind || 'single', pk, S.fx.cards);
     }
     if (S.fx.drawT0) {
       var p2 = (now - S.fx.drawT0) / 380;
@@ -791,8 +899,8 @@
 
   function kindLabel(kind) {
     var m = {
-      single: '单张', pair: '对子', trio: '三张', straight: '顺子',
-      flush: '同花', fullhouse: '三带二', four: '四张', straightflush: '同花顺'
+      single: '单张', pair: '对子', trio: '三个', straight: '顺子',
+      flush: '同花', fullhouse: '葫芦', four: '四条', straightflush: '同花顺'
     };
     return m[kind] || kind;
   }
@@ -1350,14 +1458,20 @@
 
   function draw(ctx, S, H, wW) {
     if (wW) W = wW;
+    lastH = H;
     var L = layout(H);
     var hits = [];
+    // 四条震屏：整层 translate（±6px，300ms 衰减），不震时为恒等变换
+    var shk = fxShake(S);
+    ctx.save();
+    if (shk) ctx.translate(shk.x, shk.y);
     bg(ctx, H);
     if (S.phase === 'menu' || (S.lobby && !S.game)) {
       menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
       if (S.toast) toast(ctx, S, L);
+      ctx.restore();
       return hits;
     }
     header(ctx, S, L, hits);
@@ -1374,6 +1488,7 @@
     if (S.lobby) lobbyPanel(ctx, S, L, hits);
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
+    ctx.restore();
     return hits;
   }
 
