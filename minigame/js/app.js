@@ -660,7 +660,8 @@
           humanIsWinner: plan.winners.indexOf(0) >= 0,
           humanDrawn: [],
           pairQuota: plan.pairQuota || null,
-          drawnFrom: {}
+          drawnFrom: {},
+          returned: []
         };
         S.tribute.need = S.tribute.humanIsWinner
           ? S.tribute.shares[plan.winners.indexOf(0)] : 0;
@@ -680,6 +681,7 @@
   function drawFromSeat(p) {
     var T = S.tribute;
     if (!T || T.stage !== 'draw') return;
+    T.drawnFrom = T.drawnFrom || {};   // 演示入口/旧状态可能缺该字段
     if (T.plan && T.plan.losers && T.plan.losers.indexOf(p) < 0) { toast('只能从败方手里抽'); return; }
     if (S.mode === 'online') {
       if ((T.canDraw || []).indexOf(p) < 0) { toast('这个人已经抽过了'); return; }
@@ -708,6 +710,7 @@
   function pullOne(rel, idx) {
     var T = S.tribute;
     if (!T || T.stage !== 'pull' || !T.pull) return;
+    T.drawnFrom = T.drawnFrom || {};
     if (S.mode === 'online') { NET.send({ t: 'pullPick', seatRel: rel, idx: idx }); return; }
     var p = rel;
     // 每败方上限仅适用独食抽牌方向（winners.length===1）；被抽方向（losers.length===1）
@@ -796,6 +799,7 @@
     hd.splice(idx, 1);
     S.game.players[cur.from].hand.push({ r: c.r, s: c.s });
     sortHand(hd);
+    T.returned = T.returned || [];   // 防旧状态/联机映射缺字段：先记录再推进，避免中途抛异常导致还贡卡死
     T.returned.push({ from: 0, to: cur.from, card: { r: c.r, s: c.s } });
     T.log.push({ text: '还 ' + suitRank(c) + ' 给 ' + SEAT_NAMES[cur.from], kind: 'ret' });
     T.retIdx++;
@@ -1358,7 +1362,7 @@
     S.tribute = {
       plan: { count: 2, winners: [0, 2], losers: [1, 3], winnerRanks: [1, 3], skip: false },
       draws: [], reveals: [], log: [], shares: [2, 2],
-      need: 2, stage: 'draw', canDraw: [1, 3], turnW: 0, picks: [], returned: [],
+      need: 2, stage: 'draw', canDraw: [1, 3], turnW: 0, picks: [], returned: [], drawnFrom: {},
       pull: null, humanIsWinner: true, humanDrawn: [], t0: Date.now()
     };
     if (typeof window !== 'undefined' && window.location) {
@@ -1429,6 +1433,7 @@
       turnW: -1,
       picks: [1, 3],
       returned: [],
+      drawnFrom: {},
       t0: Date.now() - 4000,
       humanIsWinner: true,
       humanDrawn: [{ from: 1, card: { r: 7, s: 1 } }, { from: 3, card: { r: 11, s: 2 } }]

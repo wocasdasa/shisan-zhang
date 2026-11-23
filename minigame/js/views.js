@@ -53,7 +53,7 @@
           step: 46,
           x0: 148
         },
-        actions: { y: H - 200, h: 56, right: true }
+        actions: { y: H - 200, h: 56 }
       };
     }
     var headerH = 96;
@@ -1155,7 +1155,8 @@
     var barY = L.actions.y + (L.actions.h - barH) / 2;
     var wHint = 108, wPass = 108, wPlay = 126, gapB = 12;
     var total = wHint + gapB + wPass + gapB + wPlay;
-    var bx = L.actions.right ? Math.round(W - 24 - total) : Math.round(W / 2 - total / 2);
+    // 主操作「出牌」按钮中心对齐屏幕中线（提示/不出排在其左侧），竖屏/横屏一致
+    var bx = Math.round(W / 2 - total + wPlay / 2);
 
     pill(ctx, bx, barY, wHint, barH, '提示', can, hits, 'hint', 'gold');
     bx += wHint + gapB;
