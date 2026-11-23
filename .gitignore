@@ -1,0 +1,35 @@
+# 开发期私有状态
+.superpowers/
+.tools/
+
+# 依赖 / 构建产物
+node_modules/
+dist/
+*.zip
+
+# 日志
+*.log
+
+# 本地截图、二维码、试听音频（核对用的图放本地，不要进仓库）
+/shot-*.png
+/menu-*.png
+/crop-*.png
+/table-shot*.png
+/preview-qr*.png
+/体验版二维码*.png
+/语音试听_*.wav
+/minigame/preview-*.png
+/minigame/land-*.png
+/minigame/online-table.png
+/minigame/preview.png
+/minigame/preview-qr*.png
+/tools/shot-*.png
+
+# 语音候选版本（生产只用 minigame/audio/voice/）
+voice-alts/
+
+# 工具临时输出
+/tools/preview-info.json
+/tools/upload-info.json
+/tools/*-result.txt
+*.tmp
