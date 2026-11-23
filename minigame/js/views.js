@@ -763,7 +763,10 @@
     if (ds && p === 0) count = Math.min(count, ds.arrived[0]);
 
     var rc = g ? (g.players[p].revealedCards || []) : [];
-    var lone = rc.indexOf(3) >= 0 && rc.indexOf(14) >= 0;
+    // 联机视图里的身份牌是 {r:n} 对象，单机是数字：统一取 rank 值
+    var rcRank = function (x) { return (x && typeof x === 'object') ? x.r : x; };
+    var lone = rc.some(function (x) { return rcRank(x) === 3; }) &&
+      rc.some(function (x) { return rcRank(x) === 14; });
 
     var compact = rect.w <= 130;
     // 新结构：左圆徽（直径 40）+ 名字 + 下行「N 张 · +分」
@@ -861,7 +864,7 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
-      txt(ctx, '♠' + rankText(r), cx, cy + 1, 11, C.gold, 'center', 600);
+      txt(ctx, '♠' + rankText(rcRank(r)), cx, cy + 1, 11, C.gold, 'center', 600);
     });
   }
 
@@ -1185,6 +1188,14 @@
     // 倒计时嵌在「出牌」按钮左侧：复用 clockChip 画法（半径 14），剩余秒数在环心
     pill(ctx, bx, barY, wPlay, barH, '出牌', can, hits, 'play', 'blue', 20);
     clockChip(ctx, bx + 26, barY + barH / 2, 14, S.timer.left, S.phase === 'play');
+  }
+
+  // 发言入口（联机）：常驻在操作带最右侧，不随「轮到你」显隐
+  function chatEntry(ctx, S, L, hits) {
+    if (S.mode !== 'online' || !S.room) return;
+    var w = 64, h = 44;
+    var x = W - 16 - w, y = L.actions.y + (L.actions.h - h) / 2;
+    pill(ctx, x, y, w, h, '发言', true, hits, 'chatOpen', 'gold');
   }
 
   function pill(ctx, x, y, w, h, label, enabled, hits, act, tone, labelDx) {
@@ -1701,6 +1712,18 @@
     });
 
     var bw = 260, bh = 62;
+    // 昵称 / 发言：头像行下方一排放两个胶囊，朋友圈式操作，不挤占席位列表
+    var nick = S.myName || '玩家';
+    var chipW = 200, chipH = 44, chipY = py + 412;
+    var cx0 = W / 2 - chipW - 10;
+    box(ctx, cx0, chipY, chipW, chipH, 22, C.btn, C.panelLine);
+    txt(ctx, '改名 · ' + nick, cx0 + chipW / 2, chipY + chipH / 2, 15, C.text, 'center');
+    hits.push({ x: cx0, y: chipY, w: chipW, h: chipH, act: 'netRename' });
+    var cx1 = W / 2 + 10;
+    box(ctx, cx1, chipY, chipW, chipH, 22, C.btn, C.panelLine);
+    txt(ctx, '发言', cx1 + chipW / 2, chipY + chipH / 2, 15, C.text, 'center');
+    hits.push({ x: cx1, y: chipY, w: chipW, h: chipH, act: 'chatOpen' });
+
     var y2 = py + ph - 168;
     if (S.isHost) {
       box(ctx, W / 2 - bw / 2, y2, bw, bh, 10, C.gold, null);
@@ -1716,6 +1739,81 @@
     txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
     hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
   }
+
+  // ---------- 联机：发言面板 / 气泡 ----------
+  function chatName(S, rel) {
+    var s = (S.seats || [])[rel];
+    var nm = s && s.name ? s.name : (SEAT_NAMES[rel] || '');
+    return rel === 0 ? '你' : nm;
+  }
+
+  function chatPanel(ctx, S, L, hits) {
+    var H = L.H;
+    overlay(ctx, H, W, H);
+    var pw = 640, ph = 620;
+    var px = (W - pw) / 2, py = Math.max(24, (H - ph) / 2);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '发言', W / 2, py + 40, 22, C.gold, 'center', 600);
+
+    // 最近 5 条
+    var msgs = (S.chats || []).slice(-5);
+    if (!msgs.length) {
+      txt(ctx, '还没人说话，点下面的表情或短语发一句', W / 2, py + 104, 14, C.dim);
+    } else {
+      msgs.forEach(function (c, i) {
+        var y = py + 82 + i * 24;
+        txt(ctx, chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text,
+          px + 28, y, c.kind === 'emoji' ? 18 : 14, c.rel === 0 ? C.gold : C.text, 'left');
+      });
+    }
+
+    // 表情：8×2
+    var ec = (S.chatEmoji || []);
+    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 214;
+    ec.slice(0, 16).forEach(function (e, i) {
+      var c = i % 8, r = Math.floor(i / 8);
+      var x = gx0 + c * cellW, y = gy0 + r * cellH;
+      box(ctx, x + 4, y + 2, cellW - 8, cellH - 8, 10, C.btn, C.panelLine);
+      txt(ctx, e, x + cellW / 2, y + cellH / 2 - 2, 26, C.text, 'center');
+      hits.push({ x: x + 4, y: y + 2, w: cellW - 8, h: cellH - 8, act: 'chatEmoji', text: e });
+    });
+
+    // 短语：2×4
+    var phs = (S.chatPhrases || []);
+    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 330;
+    phs.slice(0, 8).forEach(function (p, i) {
+      var c = i % 2, r = Math.floor(i / 2);
+      var x = c ? W / 2 + 10 : gx1, y = gy1 + r * 50;
+      box(ctx, x, y, bw2, bh2, 12, C.btn, C.panelLine);
+      txt(ctx, p, x + bw2 / 2, y + bh2 / 2, 15, C.text, 'center');
+      hits.push({ x: x, y: y, w: bw2, h: bh2, act: 'chatText', text: p });
+    });
+
+    // 关闭
+    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'chatClose' });
+  }
+
+  // 牌桌上冒出的最近发言（8 秒内、最多 3 条），从手牌左侧向上堆
+  function chatBubbles(ctx, S, L) {
+    if (S.mode !== 'online' || S.chatOpen) return;
+    var now = Date.now();
+    var live = (S.chats || []).filter(function (c) { return now - (c.ts || 0) < 8000; }).slice(-3);
+    if (!live.length) return;
+    live.forEach(function (c, i) {
+      var txtS = chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text;
+      ctx.save();
+      ctx.font = '400 ' + (c.kind === 'emoji' ? 16 : 13) + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      var tw = Math.min(300, Math.round(ctx.measureText(txtS).width) + 24);
+      ctx.restore();
+      // 从座位牌上沿往上叠，不压头像与操作条
+      var x = L.seats.south.x, y = L.seats.south.y - 10 - (live.length - i) * 32;
+      box(ctx, x, y, tw, 28, 14, 'rgba(10,20,34,0.92)', 'rgba(216,179,106,0.35)');
+      txt(ctx, txtS, x + 12, y + 14, c.kind === 'emoji' ? 16 : 13, C.text, 'left');
+    });
+  }
+
 
   function draw(ctx, S, H, wW) {
     if (wW) W = wW;
@@ -1741,6 +1839,8 @@
     if (!S.lobby && !S.waitRoom) {
       hand(ctx, S, L, hits);
       actions(ctx, S, L, hits);
+      chatEntry(ctx, S, L, hits);
+      chatBubbles(ctx, S, L);
     }
     if (S.tribute) tribute(ctx, S, L, hits);
     if (S.phase === 'settle') settle(ctx, S, L, hits);
@@ -1748,6 +1848,7 @@
     if (S.summary) summary(ctx, S, L, hits);
     if (S.lobby) lobbyPanel(ctx, S, L, hits);
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
+    if (S.chatOpen) chatPanel(ctx, S, L, hits);
     if (S.testMenu) testPanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
     ctx.restore();

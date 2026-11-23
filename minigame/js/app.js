@@ -43,7 +43,11 @@
     seats: [],
     netStatus: '',
     netView: null,
-    prevPlays: 0
+    prevPlays: 0,
+    // 昵称 / 发言
+    myName: '',
+    chats: [],
+    chatOpen: false
   };
 
   var toastTimer = null;
@@ -345,13 +349,55 @@
   // ---------- 联机 ----------
   var netBound = false;
 
-  function myName() {
+  var NAME_KEY = 'gx13_myname';
+
+  function loadName() {
+    var n = '';
+    try {
+      if (typeof wx !== 'undefined' && wx.getStorageSync) n = wx.getStorageSync(NAME_KEY) || '';
+      else if (typeof localStorage !== 'undefined') n = localStorage.getItem(NAME_KEY) || '';
+    } catch (e) {}
+    if (n) return String(n).slice(0, 6);
     if (typeof window !== 'undefined' && window.location) {
       var q = /(?:\?|&)name=([^&]+)/.exec(window.location.search || '');
       if (q) return decodeURIComponent(q[1]).slice(0, 6);
     }
-    return '玩家';
+    return '';
   }
+
+  function saveName(n) {
+    S.myName = String(n || '').slice(0, 6);
+    try {
+      if (typeof wx !== 'undefined' && wx.setStorageSync) wx.setStorageSync(NAME_KEY, S.myName);
+      else if (typeof localStorage !== 'undefined') localStorage.setItem(NAME_KEY, S.myName);
+    } catch (e) {}
+  }
+
+  function myName() {
+    return S.myName || '玩家';
+  }
+
+  // 改名：房间内立即广播给同桌；房间外先存本地，建房/加入时带上
+  function askName() {
+    P.askText('给自己起个名字（最多 6 字）', myName(), 6, function (v) {
+      var nm = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 6);
+      if (!nm) return;
+      saveName(nm);
+      if (S.mode === 'online' && S.room) NET.send({ t: 'rename', name: nm });
+      toast('昵称已改为 ' + nm);
+      P.markDirty();
+    });
+  }
+
+  function sendChat(kind, text) {
+    if (S.mode !== 'online' || !S.room) { toast('联机房间里才能发言'); return; }
+    NET.send({ t: 'chat', kind: kind, text: text });
+  }
+
+  // 预置表情/短语：画布内不调输入法，点一下即发
+  var CHAT_EMOJI = ['😀', '😄', '😎', '🤔', '😭', '😡', '👍', '👏', '🎉', '🃏', '🙏', '🤝', '💤', '🔥', '🍀', '👀'];
+  var CHAT_PHRASES = ['快点吧', '出牌真快', '承让了', '别催我', '我再想想', '再来一局', '这牌没法打', '稳住别浪'];
+
 
   function bindNet() {
     if (netBound) return;
@@ -439,8 +485,7 @@
       P.markDirty();
       return;
     }
-    if (m.t === 'state') { applyView(m); return; }
-  }
+    if (m.t === 'state') { applyView(m); return; }  }
 
   function startNetTimer(deadline) {
     clearTurnTimer();
@@ -469,6 +514,16 @@
     S.scores = S.seats.map(function (s) { return s.score || 0; });
     S.waitRoom = v.phase === 'wait';
     S.summary = v.phase === 'summary';
+    // 发言：服务端时间戳可能与手机不同步，这里换成客户端时间轴
+    // 新到的条目给「现在」，历史条目压到 8 秒前（只进面板、不冒气泡）
+    var seenTs = S.chatSeenTs || 0;
+    S.chats = (v.chat || []).map(function (c) {
+      var fresh = (c.ts || 0) > seenTs;
+      return { rel: c.rel, kind: c.kind, text: c.text, ts: fresh ? Date.now() : Date.now() - 8000 };
+    });
+    S.chatSeenTs = (v.chat || []).reduce(function (m, c) { return Math.max(m, c.ts || 0); }, seenTs);
+    // 自己在桌上的座位名跟着本地昵称走，免得服务端还没回包时显示旧名字
+    if (S.myName && S.seats[0]) S.seats[0].name = S.myName;
 
     // 记录旧 revealedCards 长度：state 更新后对比增量，触发身份特效（♠3/♠A 亮出）
     var prevRc = (S.game && S.game.players) ? S.game.players.map(function (pl) {
@@ -1184,6 +1239,11 @@
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
     if (h.act === 'netLeave') { backToSolo(); return; }
+    if (h.act === 'netRename') { askName(); return; }
+    if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
+    if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
+    if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
+    if (h.act === 'chatText') { sendChat('text', h.text); return; }
     if (h.act === 'card') { tapCard(h.i); return; }
     if (h.act === 'play') { doPlay(); return; }
     if (h.act === 'pass') { doPass(); return; }
@@ -1256,6 +1316,9 @@
   function boot() {
     P.init();
     SFX.init();
+    S.myName = loadName();
+    S.chatEmoji = CHAT_EMOJI;
+    S.chatPhrases = CHAT_PHRASES;
     P.bindTap(onTap);
     if (P.bindMove) P.bindMove(onDrag);
     if (P.bindEnd) P.bindEnd(onDragEnd);
@@ -1413,6 +1476,26 @@
       deadline: Date.now() + 15000, host: true, lastEvent: '西风 出牌'
     });
     S.hint = '轮到你出牌';
+    // 预览用：&wait=1 冻结在等待开局，核对房间面板（改名/发言入口）
+    if (typeof window !== 'undefined' && window.location &&
+        /wait=1/.test(window.location.search || '')) {
+      S.waitRoom = true;
+      S.phase = 'wait';
+      S.game = null;
+      S.isHost = true;
+    }
+
+    // 预览用：&chat=1 直接摊开发言面板并塞几条样例消息
+    if (typeof window !== 'undefined' && window.location &&
+        /chat=1/.test(window.location.search || '')) {
+      S.chatOpen = /bubble=1/.test(window.location.search || '') ? false : true;
+      var t0c = Date.now() + 3600000; // 预览专用：时间戳推到未来，保证截图时气泡不过期
+      S.chats = [
+        { rel: 1, kind: 'text', text: '快点吧', ts: t0c - 6000 },
+        { rel: 2, kind: 'emoji', text: '😭', ts: t0c - 3000 },
+        { rel: 0, kind: 'text', text: '马上就好', ts: t0c - 800 }
+      ];
+    }
     P.markDirty();
   }
 

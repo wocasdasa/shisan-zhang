@@ -129,7 +129,37 @@
     else setTimeout(tick, 16);
   }
 
-  function api() {}
+  var api = function () {};
+
+  // 取一行文字（改名等）：微信走系统键盘，浏览器预览退化为 prompt
+  function askText(title, def, maxLen, cb) {
+    maxLen = maxLen || 12;
+    if (isWx && wx.showKeyboard) {
+      var done = false;
+      var finish = function (val) {
+        if (done) return;
+        done = true;
+        if (wx.offKeyboardConfirm) wx.offKeyboardConfirm();
+        if (wx.offKeyboardComplete) wx.offKeyboardComplete();
+        if (wx.offKeyboardInput) wx.offKeyboardInput();
+        if (wx.hideKeyboard) wx.hideKeyboard({});
+        cb(String(val == null ? def : val).slice(0, maxLen));
+      };
+      if (wx.onKeyboardConfirm) wx.onKeyboardConfirm(function (res) { finish(res && res.value); });
+      if (wx.onKeyboardComplete) wx.onKeyboardComplete(function (res) { finish(res && res.value); });
+      wx.showKeyboard({
+        defaultValue: String(def || ''), maxLength: maxLen, multiple: false,
+        confirmHold: false, confirmType: 'done'
+      });
+      return true;
+    }
+    try {
+      var v = window.prompt(title || '输入', String(def || ''));
+      if (v == null) return false;
+      cb(String(v).trim().slice(0, maxLen));
+      return true;
+    } catch (e) { return false; }
+  }
 
   var exportsObj = {
     isWx: isWx,
@@ -144,6 +174,7 @@
     bindEnd: function (fn) { endHandler = fn; },
     debug: function () { return { tap: !!tapHandler, canvas: canvas === document.getElementById('game') }; },
     markDirty: function () { dirty = true; },
+    askText: askText,
     start: function (fn) { drawFn = fn; dirty = true; tick(); }
   };
 

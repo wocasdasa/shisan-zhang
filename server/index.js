@@ -80,7 +80,10 @@ function viewFor(room, viewer) {
     deadline: room.deadline || 0,
     host: room.hostSeat === viewer,
     canStart: room.phase === 'wait' && room.hostSeat === viewer && humanCount(room) >= 1,
-    lastEvent: room.lastEvent || ''
+    lastEvent: room.lastEvent || '',
+    chat: (room.chat || []).slice(-10).map((c) => ({
+      rel: rel(c.seat), kind: c.kind, text: c.text, ts: c.ts
+    }))
   };
 
   if (room.summary) view.summary = { scores: [0, 1, 2, 3].map((r) => room.scores[(viewer + r) % 4]) };
@@ -139,7 +142,9 @@ function createRoom(conn, msg) {
     summary: false,
     deadline: 0,
     timer: null,
-    lastEvent: ''
+    lastEvent: '',
+    chat: [],
+    chatLast: {}
   };
   rooms.set(id, room);
   onJoin(conn, room, msg.name, 0);
@@ -578,6 +583,33 @@ function handle(conn, msg) {
 
   if (DBG) console.log('[R' + room.round + '] 收到 ' + msg.t + ' seat=' + seat +
     (msg.cards ? ' 牌数=' + msg.cards.length : ''));
+
+  if (msg.t === 'rename') {
+    const old = playerName(room, seat);
+    const nm = String(msg.name || '').replace(/\s+/g, ' ').trim().slice(0, 6);
+    if (!nm || !room.seats[seat]) return;
+    room.seats[seat].name = nm;
+    if (nm !== old) setEvent(room, old + ' 改名为 ' + nm);
+    broadcast(room);
+    return;
+  }
+
+  if (msg.t === 'chat') {
+    const kind = msg.kind === 'emoji' ? 'emoji' : 'text';
+    const text = String(msg.text || '').replace(/\s+/g, ' ').trim()
+      .slice(0, kind === 'emoji' ? 4 : 16);
+    if (!text) return;
+    const now = Date.now();
+    room.chatLast = room.chatLast || {};
+    if (now - (room.chatLast[seat] || 0) < 500) return; // 连点节流
+    room.chatLast[seat] = now;
+    room.chat = room.chat || [];
+    room.chat.push({ seat, kind, text, ts: now });
+    if (room.chat.length > 30) room.chat.splice(0, room.chat.length - 30);
+    setEvent(room, playerName(room, seat) + (kind === 'emoji' ? ' ' : ': ') + text);
+    broadcast(room);
+    return;
+  }
 
   if (msg.t === 'ready') {
     if (room.phase !== 'wait' || !room.seats[seat]) return;
