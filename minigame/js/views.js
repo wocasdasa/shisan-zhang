@@ -47,8 +47,8 @@
         north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
         east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
-        // 自家座位牌挪到操作条右侧（按钮组靠左、主按钮居中，右侧余量稳）：底部整条带子让给手牌
-        south: { x: W - 20 - 168, y: (H - 232) + (74 - seatH) / 2, w: 168, h: seatH }
+        // 自家座位牌回到操作条左侧（底部整条带子仍是手牌）；操作条整组避开它、往右排
+        south: { x: 20, y: (H - 232) + (74 - seatH) / 2, w: 148, h: seatH }
       },
       // 出牌区居中偏上：横屏牌桌带更矮，取 0.42H；竖屏维持 0.40H
       center: { y: Math.round(H * (landscape ? 0.42 : 0.40)) },
@@ -1170,8 +1170,11 @@
     var barY = L.actions.y + (L.actions.h - barH) / 2;
     var wHint = 108, wPass = 108, wPlay = 126, gapB = 12;
     var total = wHint + gapB + wPass + gapB + wPlay;
-    // 主操作「出牌」不再按整屏中线居中（右下角是自家座位牌，会显得偏左），整体右移一点
-    var bx = Math.round(W / 2 + 36 - total + wPlay / 2);
+    // 操作条避开头像块：在「头像右侧 ~ 屏幕右边距」这段里居中（不再按整屏中线，偏右一点）
+    var plate = L.seats.south;
+    var zoneL = plate.x + plate.w + 12, zoneR = W - 16;
+    var bx = Math.round((zoneL + zoneR) / 2 - total / 2);
+    bx = Math.max(zoneL, Math.min(bx, zoneR - total));
 
     pill(ctx, bx, barY, wHint, barH, '提示', can, hits, 'hint', 'gold');
     bx += wHint + gapB;
