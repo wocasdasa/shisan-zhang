@@ -441,6 +441,7 @@
 
   function backToSolo() {
     if (S.mode === 'online') { NET.send({ t: 'leave' }); NET.close(); }
+    SFX.flush();
     S.mode = 'solo';
     S.lobby = null;
     S.waitRoom = false;
@@ -654,6 +655,7 @@
   function newMatch() {
     clearTurnTimer();
     clearTributeTimer();
+    SFX.flush();
     if (dealTick) { clearInterval(dealTick); dealTick = null; }
     S.deal = null;
     S.fx = {};

@@ -75,22 +75,43 @@
     single: 'k_single', pair: 'k_pair', trio: 'k_trio', straight: 'k_straight',
     flush: 'k_flush', fullhouse: 'k_fullhouse', four: 'k_four', straightflush: 'k_straightflush'
   };
-  var voiceWx = null, voiceHtml = null, voiceQ = [], voiceBusy = false;
+  var voiceWx = null, voiceHtml = null, voiceQ = [], voiceBusy = false, voiceTimer = null;
+  var VOICE_GAP = 90;       // 两个词之间的换气停顿（ms）
+  var VOICE_WATCH = 1600;   // 单个词最长时限（实际 0.6~0.9s），防止 onEnded 缺失时卡死队列
+  var VOICE_MAX_UNIT = 4;   // 最多排 4 手待播，超出丢最早的，避免越播越拖
+
+  function voiceClearTimer() {
+    if (voiceTimer) { try { clearTimeout(voiceTimer); } catch (e) {} voiceTimer = null; }
+  }
+
+  // 当前这一小段（一个词）播完了：留一点空隙再继续
+  function voiceDone() {
+    voiceClearTimer();
+    if (!voiceBusy) return;          // error / ended 可能各触发一次，只认第一次
+    voiceBusy = false;
+    if (!voiceQ.length) return;
+    setTimeout(voicePump, VOICE_GAP);
+  }
 
   function voicePump() {
-    if (voiceBusy || !voiceQ.length) return;
-    var file = voiceQ.shift();
+    if (voiceBusy) return;
+    // 跳过已经播空的条目
+    while (voiceQ.length && !voiceQ[0].list.length) voiceQ.shift();
+    if (!voiceQ.length) return;
+    var unit = voiceQ[0];
+    var file = unit.list.shift();
     var src = VOICE_DIR + file + '.wav';
     voiceBusy = true;
+    voiceClearTimer();
+    voiceTimer = setTimeout(voiceDone, VOICE_WATCH);
     try {
       if (isWx && typeof wx.createInnerAudioContext === 'function') {
         if (!voiceWx) {
           voiceWx = wx.createInnerAudioContext();
           voiceWx.volume = 0.9;
-          voiceWx.onEnded(function () { voiceBusy = false; voicePump(); });
-          voiceWx.onError(function () { voiceBusy = false; voicePump(); });
+          voiceWx.onEnded(voiceDone);
+          voiceWx.onError(voiceDone);
         }
-        try { voiceWx.stop(); } catch (e) {}
         voiceWx.src = src;
         voiceWx.play();
         return;
@@ -99,26 +120,30 @@
         if (!voiceHtml) {
           voiceHtml = new Audio();
           voiceHtml.volume = 0.9;
-          voiceHtml.addEventListener('ended', function () { voiceBusy = false; voicePump(); });
-          voiceHtml.addEventListener('error', function () { voiceBusy = false; voicePump(); });
+          voiceHtml.addEventListener('ended', voiceDone);
+          voiceHtml.addEventListener('error', voiceDone);
         }
-        try { voiceHtml.pause(); } catch (e) {}
         voiceHtml.src = src;
         var pr = voiceHtml.play();
-        if (pr && pr.catch) pr.catch(function () { voiceBusy = false; voicePump(); });
+        if (pr && pr.catch) pr.catch(voiceDone);
         return;
       }
     } catch (e) {}
-    voiceBusy = false;
+    voiceDone();
   }
 
-  // 依次播报一组词；新播报进来时打断旧的（避免两条叠着响）
+  // 播报一组词：排进队列，说完整段（短语/花色点数）再播下一手，绝不打断正在念的
   function voiceSpeak(files) {
-    voiceQ = (files || []).slice();
-    voiceBusy = false;
-    try { if (voiceWx) voiceWx.stop(); } catch (e) {}
-    try { if (voiceHtml) voiceHtml.pause(); } catch (e) {}
-    voicePump();
+    if (!files || !files.length) return;
+    voiceQ.push({ list: files.slice() });
+    while (voiceQ.length > VOICE_MAX_UNIT) voiceQ.shift();
+    if (!voiceBusy) voicePump();
+  }
+
+  // 清空待播队列（离桌/重开时用，不影响正在念的那句）
+  function voiceFlush() {
+    voiceQ = [];
+    voiceClearTimer();
   }
 
   // 单张直接报「花色+点数」；对子/三个只补点数（不逐张念花色，避免播报过长）
@@ -215,6 +240,7 @@
       }
     },
     toggle: function () { A.enabled = !A.enabled; resume(); return A.enabled; },
+    flush: voiceFlush,
     // 播报这手出了什么：单张直接报「梅花2」；对子/三个报「对子K」「三个3」；其余只报牌型
     say: function (kind, cards) {
       if (!A.enabled) return;
