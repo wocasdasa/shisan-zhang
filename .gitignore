@@ -28,8 +28,13 @@ dist/
 # 语音候选版本（生产只用 minigame/audio/voice/）
 voice-alts/
 
-# 工具临时输出
+# 工具临时输出（截图/二维码也放本地）
+/tools/preview-*.png
 /tools/preview-info.json
 /tools/upload-info.json
 /tools/*-result.txt
 *.tmp
+
+# 微信开发者工具的本地私人配置（每人不同，不进仓库）
+/minigame/project.private.config.json
+
