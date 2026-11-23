@@ -67,9 +67,40 @@
     } catch (e) {}
   }
 
+  // ---------- 出牌语音播报（本地预合成音频，仅报牌型；单张报点数） ----------
+  // 音频由 tools/ 侧 SAPI 预生成：minigame/audio/voice/*.wav（16kHz 单声道，已剪静音）
+  var VOICE_DIR = 'audio/voice/';
+  var KIND_VOICE = {
+    pair: 'k_pair', trio: 'k_trio', straight: 'k_straight', flush: 'k_flush',
+    fullhouse: 'k_fullhouse', four: 'k_four', straightflush: 'k_straightflush'
+  };
+  var voiceWx = null, voiceHtml = null;
+
+  function voicePlay(file) {
+    var src = VOICE_DIR + file + '.wav';
+    try {
+      if (isWx && typeof wx.createInnerAudioContext === 'function') {
+        if (!voiceWx) {
+          voiceWx = wx.createInnerAudioContext();
+          voiceWx.volume = 0.9;
+        }
+        try { voiceWx.stop(); } catch (e) {}
+        voiceWx.src = src;
+        voiceWx.play();
+      } else if (typeof Audio !== 'undefined') {
+        if (!voiceHtml) voiceHtml = new Audio();
+        // 前一句未播完时直接切换，避免两条播报叠着响
+        try { voiceHtml.pause(); } catch (e) {}
+        voiceHtml.src = src;
+        voiceHtml.volume = 0.9;
+        var pr = voiceHtml.play();
+        if (pr && pr.catch) pr.catch(function () {});
+      }
+    } catch (e) {}
+  }
+
   var bank = {
-    deal: function () { noise(0.035, 1100, 0.3, 'bandpass'); },
-    tap: function () { tone(1150, 0.02, 0.055, 'square'); },
+    deal: function () { noise(0.035, 1100, 0.3, 'bandpass'); },    tap: function () { tone(1150, 0.02, 0.055, 'square'); },
     draw: function () {
       noise(0.05, 3200, 0.42, 'highpass');
       tone(560, 0.075, 0.15, 'triangle', 980);
@@ -147,7 +178,14 @@
         tone(130, 0.2, 0.16, 'sine', 70);
       }
     },
-    toggle: function () { A.enabled = !A.enabled; resume(); return A.enabled; }
+    toggle: function () { A.enabled = !A.enabled; resume(); return A.enabled; },
+    // 播报这手出了什么：牌型 → 对子/三个/顺子/同花/葫芦/四条/同花顺；单张 → 点数
+    say: function (kind, cards) {
+      if (!A.enabled) return;
+      if (kind && kind !== 'single' && KIND_VOICE[kind]) { voicePlay(KIND_VOICE[kind]); return; }
+      var c = cards && cards[0];
+      if (c && c.r >= 2 && c.r <= 14) voicePlay('r_' + c.r);
+    }
   };
 
   if (typeof module === 'object' && module.exports) module.exports = A;

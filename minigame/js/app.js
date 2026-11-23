@@ -279,6 +279,7 @@
     S.fx.cards = (last && last.cards) || null; // 记录该手牌数组：kindFx 同花按实际花色着色
     SFX.play('shock');
     SFX.playKind(k);
+    SFX.say(k, S.fx.cards); // 语音播报这手牌型（单张报点数）
     S.fx.seatPlay = { p: seat, t0: Date.now() };
     fxIdentityCards(last && last.cards, seat); // 本手含 ♠3/♠A → 身份特效
     fxLoneCheck(); // 出牌后直接判：revealedCards 齐 ♠3+♠A → 独食揭示
@@ -306,6 +307,7 @@
         S.fx.kind = (tl && tl.combo && tl.combo.kind) || 'single';
         S.fx.cards = (tl && tl.cards) || null;
         SFX.play('shock');
+        SFX.say(S.fx.kind, S.fx.cards); // 与 fxPlayed 同口径：AI 直出也播报
         S.fx.seatPlay = { p: p, t0: Date.now() };
         fxIdentityCards(tl && tl.cards, p); // 与 fxPlayed 同一触发口径：♠3/♠A 亮出
         fxLoneCheck(); // 与 fxPlayed 同一口径：独食揭示
@@ -1200,7 +1202,7 @@
     if (P.bindMove) P.bindMove(onDrag);
     if (P.bindEnd) P.bindEnd(onDragEnd);
     P.start(draw);
-    if (typeof window !== 'undefined') window.__gx = { S: S, P: P, onTap: onTap };
+    if (typeof window !== 'undefined') window.__gx = { S: S, P: P, onTap: onTap, SFX: SFX };
     if (typeof window !== 'undefined' && window.location &&
         /demo=pullTest/.test(window.location.search || '')) {
       demoPullTest();
