@@ -36,7 +36,7 @@
     var headerH = 96;
     var seatW = 176, seatH = 64;
     var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
-    var handY = H - 258;               // 手牌顶边：底部留 手牌 100 + 操作条 74 + 间距/边距
+    var handY = H - 152;               // 手牌顶边：底部留 手牌 100 + 52 边距（手牌贴底排）
     var tableTop = rowY + seatH + 8;   // 内框顶边顺到顶排座位牌之下（不再横穿座位牌/抽牌扇形）
     return {
       H: H,
@@ -47,8 +47,8 @@
         north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
         east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
-        // 自家座位牌挪到手牌下方（原操作条槽位）：操作条改到手牌上方后腾出的位置
-        south: { x: 24, y: H - 112 + (74 - seatH) / 2, w: seatW, h: seatH }
+        // 自家座位牌挪到操作条右侧（按钮组靠左、主按钮居中，右侧余量稳）：底部整条带子让给手牌
+        south: { x: W - 20 - 168, y: (H - 232) + (74 - seatH) / 2, w: 168, h: seatH }
       },
       // 出牌区居中偏上：横屏牌桌带更矮，取 0.42H；竖屏维持 0.40H
       center: { y: Math.round(H * (landscape ? 0.42 : 0.40)) },
@@ -1026,7 +1026,7 @@
       ? Math.max(56, (L.actions.y - 10) - (L.seats.north.y + L.seats.north.h) - 40)
       : 999;
     var cw = Math.floor((maxW - (n - 1) * gap) / n);
-    cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 106 : n <= 5 ? 78 : 54));
+    cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 90 : n <= 5 ? 64 : 42));
     var ch = Math.round(cw * 1.38);
     var blockW = n * cw + (n - 1) * gap;
     var cxB = W / 2;
@@ -1170,8 +1170,8 @@
     var barY = L.actions.y + (L.actions.h - barH) / 2;
     var wHint = 108, wPass = 108, wPlay = 126, gapB = 12;
     var total = wHint + gapB + wPass + gapB + wPlay;
-    // 主操作「出牌」按钮中心对齐屏幕中线（提示/不出排在其左侧），竖屏/横屏一致
-    var bx = Math.round(W / 2 - total + wPlay / 2);
+    // 主操作「出牌」不再按整屏中线居中（右下角是自家座位牌，会显得偏左），整体右移一点
+    var bx = Math.round(W / 2 + 36 - total + wPlay / 2);
 
     pill(ctx, bx, barY, wHint, barH, '提示', can, hits, 'hint', 'gold');
     bx += wHint + gapB;
