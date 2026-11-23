@@ -36,7 +36,7 @@
     var headerH = 96;
     var seatW = 176, seatH = 64;
     var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
-    var handY = H - 282;               // 手牌顶边：底部留 手牌 100 + 操作条 74 + 间距/边距
+    var handY = H - 258;               // 手牌顶边：底部留 手牌 100 + 操作条 74 + 间距/边距
     var tableTop = rowY + seatH + 8;   // 内框顶边顺到顶排座位牌之下（不再横穿座位牌/抽牌扇形）
     return {
       H: H,
