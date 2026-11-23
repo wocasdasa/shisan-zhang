@@ -2042,7 +2042,7 @@ define("js/views.js", function (require, module, exports) {
     var headerH = 96;
     var seatW = 176, seatH = 64;
     var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
-    var handY = H - 268;               // 手牌顶边：底部留 手牌 90 + 操作条 74 + 间距/边距
+    var handY = H - 282;               // 手牌顶边：底部留 手牌 100 + 操作条 74 + 间距/边距
     var tableTop = rowY + seatH + 8;   // 内框顶边顺到顶排座位牌之下（不再横穿座位牌/抽牌扇形）
     return {
       H: H,
@@ -2060,9 +2060,9 @@ define("js/views.js", function (require, module, exports) {
       center: { y: Math.round(H * (landscape ? 0.42 : 0.40)) },
       hand: {
         y: handY,
-        cardW: 64,
-        cardH: 90,
-        step: 52
+        cardW: 70,
+        cardH: 100,
+        step: 56
       },
       // 操作条（提示/不出/出牌）移到手牌正上方，与手牌留 6px 间距
       actions: { y: handY - 80, h: 74 }
@@ -3027,12 +3027,12 @@ define("js/views.js", function (require, module, exports) {
     // 最新一手：放大居中
     var n = newest.cards.length;
     var gap = n >= 8 ? 6 : 12;
-    var maxW = L.landscape ? Math.min(W - 220, 480) : Math.min(W - 280, 430);
+    var maxW = L.landscape ? Math.min(W - 220, 500) : Math.min(W - 260, 470);
     var chCap = L.landscape
       ? Math.max(56, (L.actions.y - 10) - (L.seats.north.y + L.seats.north.h) - 40)
       : 999;
     var cw = Math.floor((maxW - (n - 1) * gap) / n);
-    cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 96 : n <= 5 ? 70 : 48));
+    cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 106 : n <= 5 ? 78 : 54));
     var ch = Math.round(cw * 1.38);
     var blockW = n * cw + (n - 1) * gap;
     var cxB = W / 2;
@@ -3151,7 +3151,7 @@ define("js/views.js", function (require, module, exports) {
     mine.slice(0, n).forEach(function (c, i) {
       var sel = S.selected.some(function (s) { return s.r === c.r && s.s === c.s; });
       var x = hx + i * step;
-      var y = L.hand.y - (sel ? 22 : 0);
+      var y = L.hand.y - (sel ? 24 : 0);
       drawCard(ctx, x, y, L.hand.cardW, L.hand.cardH, c, { mark: sel });
       hits.push({ x: x, y: y, w: Math.min(step, L.hand.cardW), h: L.hand.cardH, act: 'card', i: i });
     });
