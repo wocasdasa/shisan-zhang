@@ -612,6 +612,48 @@
     startRound();
   }
 
+  // ---------- 测试手牌（调试用） ----------
+  // 主视角固定 13 张：4×3、4×A、4×2 + ♦4；其余 39 张按原局随机分给三家
+  function specialHand() {
+    var out = [];
+    [3, 14, 2].forEach(function (r) {
+      for (var s = 0; s < 4; s++) out.push({ r: r, s: s });
+    });
+    out.push({ r: 4, s: 0 });
+    return out;
+  }
+
+  // 把特殊 13 张换到真人手里：整副 52 张先归池，捞出特殊 13 张给真人，其余 39 张重分三家
+  function applyTestDeck(g) {
+    if (!g || !g.players || g.players.length < 4) return;
+    var spec = specialHand();
+    var pool = [];
+    for (var p = 0; p < 4; p++) {
+      pool = pool.concat(g.players[p].hand);
+      g.players[p].hand = [];
+    }
+    var specCards = [], rest = [];
+    pool.forEach(function (c) {
+      var isSpec = false;
+      for (var i = 0; i < spec.length; i++) {
+        if (spec[i].r === c.r && spec[i].s === c.s) { isSpec = true; break; }
+      }
+      if (isSpec) specCards.push(c); else rest.push(c);
+    });
+    g.players[0].hand = specCards.length === 13
+      ? specCards
+      : spec.map(function (c) { return { r: c.r, s: c.s }; });
+    for (var q = 1; q < 4; q++) g.players[q].hand = rest.splice(0, 13);
+    sortHand(g.players[0].hand);
+    // 先手按方块4 定：♦4 已换到主视角，回合也要同步给主视角，否则原 ♦4 持有者仍先出
+    g.turn = 0;
+    g.combo = null;
+    g.comboOwner = -1;
+    g.lastPlayer = -1;
+    g.trickPlays = [];
+    g.firstPlayPending = false;
+  }
+
   function startRound() {
     clearTurnTimer();
     clearTributeTimer();
@@ -623,7 +665,14 @@
     S.tribute = null;
     S.busy = false;
     var seed = Math.floor(Math.random() * 4e9);
-    S.game = GX.Table.createRound({ seed: seed, config: S.cfg });
+    var cfg = S.cfg;
+    if (S.testDeck) { // 测试模式：关掉进贡，保证每局都是同一手特殊牌且 ♦4 先手
+      cfg = {};
+      for (var k in S.cfg) cfg[k] = S.cfg[k];
+      cfg.tributeEnabled = false;
+    }
+    S.game = GX.Table.createRound({ seed: seed, config: cfg });
+    if (S.testDeck) applyTestDeck(S.game); // 测试模式：主视角固定特殊牌
 
     // 发牌动画：52 张按逆时针一人一张，约 2.1 秒
     S.phase = 'deal';
@@ -648,7 +697,7 @@
     S.deal = null;
     if (!S.game) return;
 
-    if (S.mode === 'solo' && S.round >= 2 && S.cfg.tributeEnabled && S.lastResult) {
+    if (S.mode === 'solo' && S.round >= 2 && S.cfg.tributeEnabled && !S.testDeck && S.lastResult) {
       var plan = GX.Tribute.plan(S.lastResult, S.cfg);
       if (!plan.skip && plan.count > 0) {
         S.tribute = {
@@ -1144,12 +1193,24 @@
     if (h.act === 'hint') { doHint(); return; }
     if (h.act === 'drawSeat') { drawFromSeat(h.p); return; }
     if (h.act === 'pullCard') { pullOne(h.p, h.idx); return; }
-    if (h.act === 'testTribute') { demoPullTest(); return; }
+    if (h.act === 'testTribute') { S.testMenu = false; demoPullTest(); return; }
+    if (h.act === 'testMenu') { S.testMenu = !S.testMenu; P.markDirty(); return; }
+    if (h.act === 'testHand') {
+      // 测试模式：单机新局，主视角固定 4×3 / 4×A / 4×2 + ♦4
+      S.testMenu = false;
+      S.testDeck = true;
+      S.mode = 'solo';
+      S.game = null;
+      newMatch();
+      return;
+    }
     if (h.act === 'confirmReturn') { confirmReturn(); return; }
     if (h.act === 'toMenu') {
       clearTurnTimer();
       clearTributeTimer();
       S.phase = 'menu';
+      S.testMenu = false;
+      S.testDeck = false;
       S.summary = false;
       S.game = null;
       S.deal = null;
@@ -1221,6 +1282,14 @@
       S.lastResult = { ranks: [1, 2, 0, 3], camp: { mode: 'team', teamA: [1, 2], teamB: [0, 3] } };
       S.round = 2;
       finishDeal();
+      return;
+    }
+    if (typeof window !== 'undefined' && window.location &&
+        /demo=testHand/.test(window.location.search || '')) {
+      // 预览/真机用：直接进测试模式（主视角 4×3 / 4×A / 4×2 + ♦4）
+      S.testDeck = true;
+      S.mode = 'solo';
+      newMatch();
       return;
     }
     if (typeof window !== 'undefined' && window.location &&

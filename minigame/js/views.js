@@ -47,7 +47,8 @@
         north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
         east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
-        south: { x: 24, y: handY - 84, w: seatW, h: seatH }
+        // 自家座位牌挪到手牌下方（原操作条槽位）：操作条改到手牌上方后腾出的位置
+        south: { x: 24, y: H - 112 + (74 - seatH) / 2, w: seatW, h: seatH }
       },
       // 出牌区居中偏上：横屏牌桌带更矮，取 0.42H；竖屏维持 0.40H
       center: { y: Math.round(H * (landscape ? 0.42 : 0.40)) },
@@ -57,7 +58,8 @@
         cardH: 90,
         step: 52
       },
-      actions: { y: H - 112, h: 74 }
+      // 操作条（提示/不出/出牌）移到手牌正上方，与手牌留 6px 间距
+      actions: { y: handY - 80, h: 74 }
     };
   }
 
@@ -722,11 +724,11 @@
     txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, fs, on ? C.text : C.dim);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'audio' });
 
-    // 进贡流程测试入口
+    // 测试入口（点开小面板：特殊牌 / 进贡流程）
     x -= gap + 78;
     box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
-    txt(ctx, '测进贡', x + 39, y + h / 2, fs, C.gold);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'testTribute' });
+    txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
+    hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
   }
 
   // ---------- 座位 ----------
@@ -1021,7 +1023,7 @@
     var gap = n >= 8 ? 6 : 12;
     var maxW = L.landscape ? Math.min(W - 220, 480) : Math.min(W - 280, 430);
     var chCap = L.landscape
-      ? Math.max(56, (L.hand.y - 50 - 44 - 6) - (L.seats.north.y + L.seats.north.h) - 12)
+      ? Math.max(56, (L.actions.y - 10) - (L.seats.north.y + L.seats.north.h) - 40)
       : 999;
     var cw = Math.floor((maxW - (n - 1) * gap) / n);
     cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 96 : n <= 5 ? 70 : 48));
@@ -1030,7 +1032,7 @@
     var cxB = W / 2;
     var x0 = cxB - blockW / 2;
     var yTop = Math.max(cy - ch / 2, L.seats.north.y + L.seats.north.h + 26);
-    yTop = Math.min(yTop, L.hand.y - ch - 74);
+    yTop = Math.min(yTop, L.actions.y - ch - 8);
 
     var raw = fxProgress(S, 'playT0', 300);
     if (raw < 0.58) {
@@ -1509,10 +1511,38 @@
     hits.push({ x: W / 2 - bw / 2, y: py + ph - 22, w: bw, h: 42, act: 'toMenu' });
   }
 
+  // ---------- 测试模式小面板（页头「测试」入口） ----------
+  function testPanel(ctx, S, L, hits) {
+    overlay(ctx, L.H, W, L.H);
+    var pw = 520, ph = 296;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2;
+    if (py < 8) py = 8;
+    if (px < 8) px = (W - pw) / 2;
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '测试模式', W / 2, py + 34, 20, C.gold, 'center', 600);
+    txt(ctx, '主视角固定 4×3 / 4×A / 4×2 + ♦4', W / 2, py + 60, 14, C.dim, 'center');
+
+    var bw = pw - 56, bh = 52;
+    var bx = W / 2 - bw / 2, by = py + 84;
+    box(ctx, bx, by, bw, bh, 10, C.gold, null);
+    txt(ctx, '特殊牌开局（4×3 / 4×A / 4×2 + ♦4）', W / 2, by + bh / 2, 17, '#101f33', 'center', 600);
+    hits.push({ x: bx, y: by, w: bw, h: bh, act: 'testHand' });
+
+    by += bh + 12;
+    box(ctx, bx, by, bw, bh, 10, C.btn, C.panelLine);
+    txt(ctx, '进贡流程演示', W / 2, by + bh / 2, 17, C.text, 'center');
+    hits.push({ x: bx, y: by, w: bw, h: bh, act: 'testTribute' });
+
+    by += bh + 12;
+    box(ctx, bx, by, bw, 44, 10, C.btn, C.panelLine);
+    txt(ctx, '关闭', W / 2, by + 22, 16, C.text, 'center');
+    hits.push({ x: bx, y: by, w: bw, h: 44, act: 'testMenu' });
+  }
+
   function toast(ctx, S, L) {
     var w = 420, h = 54;
     // 横屏牌桌带太矮，提示条放到手牌上方（不压出牌区）
-    var y0 = L.landscape ? L.hand.y - 66 : L.H - 400;
+    var y0 = L.seats.south.y - 66;
     box(ctx, W / 2 - w / 2, y0, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
     txt(ctx, S.toast, W / 2, y0 + 27, 17, C.text);
   }
@@ -1715,6 +1745,7 @@
     if (S.summary) summary(ctx, S, L, hits);
     if (S.lobby) lobbyPanel(ctx, S, L, hits);
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
+    if (S.testMenu) testPanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
     ctx.restore();
     return hits;
