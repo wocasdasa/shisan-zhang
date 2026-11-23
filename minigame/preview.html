@@ -1959,50 +1959,29 @@ define("js/views.js", function (require, module, exports) {
   function rankText(r) { return RANK_TXT[r] || String(r); }
   function isRed(c) { return c.s === 0 || c.s === 2; }
 
+  // 竖屏/横屏共用同一套几何语义：座位牌 176×64 沿桌边一行、出牌区居中偏上、
+  // 手牌底排居中、操作条底部成组。横屏设计高恒为 750（宽随屏幕比例伸缩），
+  // 所以这套「以底边为锚」的绝对节奏在两种方向都成立（竖屏 1334 高只是上下更宽松）。
   function layout(H) {
     var landscape = (W / H) >= 1.2;
-    if (landscape) {
-      var handY = H - 92;
-      var barTop = handY - 44 - 8;
-      var midY = Math.round((36 + 48 + barTop) / 2);
-      return {
-        H: H,
-        headerH: 56,
-        landscape: true,
-        table: { top: 56, bottom: H - 110 },
-        seats: {
-          north: { x: Math.round(W / 2) - 75, y: 36, w: 150, h: 48 },
-          west: { x: 14, y: Math.round(H / 2) - 60, w: 130, h: 56 },
-          east: { x: W - 14 - 130, y: Math.round(H / 2) - 60, w: 130, h: 56 },
-          south: { x: 14, y: H - 82, w: 122, h: 66 }
-        },
-        center: { y: midY },
-        hand: {
-          y: H - 100,
-          cardW: 96,
-          cardH: 100,
-          step: 46,
-          x0: 148
-        },
-        actions: { y: H - 200, h: 56 }
-      };
-    }
     var headerH = 96;
     var seatW = 176, seatH = 64;
-    var rowY = headerH + 8;
-    var handY = H - 268;
+    var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
+    var handY = H - 268;               // 手牌顶边：底部留 手牌 90 + 操作条 74 + 间距/边距
+    var tableTop = rowY + seatH + 8;   // 内框顶边顺到顶排座位牌之下（不再横穿座位牌/抽牌扇形）
     return {
       H: H,
       headerH: headerH,
-      landscape: false,
-      table: { top: headerH, bottom: handY - 96 },
+      landscape: landscape,
+      table: { top: tableTop, bottom: handY - 96 },
       seats: {
         north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
         east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
         south: { x: 24, y: handY - 84, w: seatW, h: seatH }
       },
-      center: { y: Math.round(H * 0.40) },
+      // 出牌区居中偏上：横屏牌桌带更矮，取 0.42H；竖屏维持 0.40H
+      center: { y: Math.round(H * (landscape ? 0.42 : 0.40)) },
       hand: {
         y: handY,
         cardW: 64,
@@ -2057,7 +2036,8 @@ define("js/views.js", function (require, module, exports) {
     ctx.fillText(s, x, y);
   }
 
-  function bg(ctx, H) {
+  function bg(ctx, L) {
+    var H = L.H;
     var g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, C.bg1);
     g.addColorStop(0.45, C.felt);
@@ -2065,14 +2045,14 @@ define("js/views.js", function (require, module, exports) {
     ctx.fillStyle = g;
     ctx.fillRect(-12, -12, W + 24, H + 24); // 外扩 12px：四条震屏 translate 时不露白边
 
-    // 牌桌内框
-    var landscape = (W / H) >= 1.2;
-    var pad = 18;
-    var handY0 = H - 100;
-    var barTop0 = handY0 - 52;
-    var inner = landscape
-      ? { x: pad, y: 64, w: W - pad * 2, h: Math.max(110, barTop0 - 64 - 6) }
-      : { x: 48, y: 150, w: W - 96, h: H - 514 };
+    // 牌桌内框：顶边起于顶排座位牌之下（竖横屏同一来源，见 layout 的 tableTop）
+    var pad = 48;
+    var inner = {
+      x: pad,
+      y: L.table.top,
+      w: W - pad * 2,
+      h: L.table.bottom - L.table.top
+    };
     box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
 
     // 水印（放两侧留白，避免压住出牌区）
@@ -2213,7 +2193,7 @@ define("js/views.js", function (require, module, exports) {
   }
 
   // 牌型横幅：居中偏上金色立体字，缩放 0.6→1.1→1.0 弹入（前 30%），停留，末段上移淡出
-  function banner(ctx, text, p) {
+  function banner(ctx, text, p, L) {
     var s = 1, a = 1, dy = 0;
     if (p < 0.3) {
       var t = p / 0.3;
@@ -2225,8 +2205,12 @@ define("js/views.js", function (require, module, exports) {
       a = 1 - u;
     }
     if (a <= 0) return;
-    var size = Math.max(30, Math.round(W * 0.058));
-    var cy = Math.round((lastH || 640) * 0.30) + dy;
+    // 字号按短边取：竖屏=750 宽，横屏=750 高，避免横屏 W（可 1333+）把字放大到压住出牌区
+    var size = L.landscape
+      ? Math.max(30, Math.round(Math.min(W, L.H) * 0.045))
+      : Math.max(30, Math.round(W * 0.058));
+    // 横屏牌桌带只有 ~210 高：横幅贴内框上沿，与出牌区标题留出间隙；竖屏保持 0.30H 定稿位
+    var cy = L.landscape ? L.table.top + 24 : Math.round((lastH || 640) * 0.30);
     ctx.save();
     ctx.translate(W / 2, cy);
     ctx.scale(s, s);
@@ -2386,7 +2370,8 @@ define("js/views.js", function (require, module, exports) {
   function loneRevealFx(ctx, S, L, H, p, seat) {
     if (p >= 1) return; // 结束后：特效层清空，独食者座位朱红边框常驻
     var cx = W / 2;
-    var cy = Math.min(L.center.y, L.hand.y - 90);
+    // 横屏牌桌带更矮：整体上移到内框上沿下方，保证「独食」大字落在带内（不压底排座位牌/手牌）
+    var cy = L.landscape ? L.table.top + 72 : Math.min(L.center.y, L.hand.y - 90);
     var fade = p > 0.85 ? Math.max(0, 1 - (p - 0.85) / 0.15) : 1;
 
     // 全程：桌面压暗至 40%（前 20% 淡入）
@@ -2424,7 +2409,8 @@ define("js/views.js", function (require, module, exports) {
     if (p >= 0.45) {
       var q = (p - 0.45) / 0.55;
       var sq = easeOut(Math.min(1, q * 1.6)); // 快砸：前段完成大部分缩放
-      var size = Math.max(44, Math.round(W * 0.085));
+      // 字号按短边取：横屏（W 远大于 H）不再被 W 放大到压住底排
+      var size = Math.max(44, Math.round((L.landscape ? Math.min(W, H) : W) * 0.085));
       var ty = cy + ch / 2 + 46;
       // 黑红粒子爆发：13 黑 + 13 朱红 = 26 枚（预算推导见 task-7 报告）
       burst(ctx, cx, ty, q, 13, 190, '20,24,32');
@@ -2562,7 +2548,7 @@ define("js/views.js", function (require, module, exports) {
     }
     // 非单张牌型叠加横幅（label !== k 兜底未知牌型不显示原文）
     var label = kindLabel(k);
-    if (k && k !== 'single' && label !== k) banner(ctx, label, p);
+    if (k && k !== 'single' && label !== k) banner(ctx, label, p, L);
   }
 
   function fxOverlay(ctx, S, L, H) {
@@ -2766,11 +2752,22 @@ define("js/views.js", function (require, module, exports) {
     var subFs = compact ? 11 : 12;
     var ly = rect.y + rect.h / 2 + 11;
     var pre = g ? (count + ' 张 · ') : '—';
+    var ptsTxt = g ? ((pts > 0 ? '+' : '') + pts + '分') : '';
+    // 极端值（13 张 + 三位数分）防溢出：整行量宽后缩字号，最低 9px
+    var avail = rect.x + rect.w - 10 - lx;
+    var fontOf = function (fs) {
+      return '400 ' + fs + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+    };
+    var lineW = function (fs) {
+      ctx.font = fontOf(fs);
+      return ctx.measureText(pre).width + (ptsTxt ? ctx.measureText(ptsTxt).width : 0);
+    };
+    while (subFs > 9 && lineW(subFs) > avail) subFs -= 1;
     txt(ctx, pre, lx, ly, subFs, C.dim, 'left');
     if (g) {
-      ctx.font = '400 ' + subFs + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      ctx.font = fontOf(subFs);
       var off = ctx.measureText(pre).width;
-      txt(ctx, (pts > 0 ? '+' : '') + pts + '分', lx + off, ly, subFs,
+      txt(ctx, ptsTxt, lx + off, ly, subFs,
         pts > 0 ? C.gold : pts < 0 ? '#d99a98' : C.dim, 'left', 600);
     }
 
@@ -2852,9 +2849,18 @@ define("js/views.js", function (require, module, exports) {
             ctx.stroke();
             ctx.restore();
             if (posNm !== 'north') {
-              var bx1 = rect.x + rect.w / 2;
-              box(ctx, bx1 - 34, rect.y - 32, 68, 22, 11, 'rgba(233,184,77,0.95)', null);
-              txt(ctx, '点我抽牌', bx1, rect.y - 21, 12, '#3b2a08', 'center', 600);
+              // 横屏座位牌贴页头下沿，标注改挂在牌侧（与底部时钟同一套位），不压页头副标
+              var bx1, by1;
+              if (L.landscape) {
+                // 横屏：挂在牌侧上角（同底部时钟位），不压页头副标、也不压牌旁的三张牌背
+                bx1 = posNm === 'east' ? rect.x - 40 : rect.x + rect.w + 40;
+                by1 = rect.y + 12;
+              } else {
+                bx1 = rect.x + rect.w / 2;
+                by1 = rect.y - 21;
+              }
+              box(ctx, bx1 - 34, by1 - 11, 68, 22, 11, 'rgba(233,184,77,0.95)', null);
+              txt(ctx, '点我抽牌', bx1, by1, 12, '#3b2a08', 'center', 600);
             }
           } else if (wasPicked) {
             box(ctx, rect.x - 2, rect.y + rect.h - 2, 40, 18, 6, 'rgba(176,42,47,0.92)', null);
@@ -2872,9 +2878,17 @@ define("js/views.js", function (require, module, exports) {
       // 轮到谁出牌：时钟浮在他头上（自己的回合在底部按钮条里显示）
       if (p !== 0 && S.phase === 'play' && S.game && !S.game.over && S.game.turn === p) {
         var posName = SEAT_POS[p];
-        var cx0 = rect.x + rect.w / 2;
-        var cy0 = posName === 'north' ? rect.y + rect.h + 22 : rect.y - 24;
-        if (posName === 'south') { cx0 = rect.x + rect.w + 26; cy0 = rect.y + rect.h / 2; }
+        var cx0, cy0;
+        if (L.landscape) {
+          // 横屏四家座位牌都贴桌边一行：时钟贴牌侧显示（东家放左侧朝内），
+          // 不压页头副标、也不压牌下方的身份徽标
+          cx0 = posName === 'east' ? rect.x - 24 : rect.x + rect.w + 24;
+          cy0 = rect.y + rect.h / 2;
+        } else {
+          cx0 = rect.x + rect.w / 2;
+          cy0 = posName === 'north' ? rect.y + rect.h + 22 : rect.y - 24;
+          if (posName === 'south') { cx0 = rect.x + rect.w + 26; cy0 = rect.y + rect.h / 2; }
+        }
         var r0 = 17;
         var hasTimer = S.timer.left > 0;
         var warn = hasTimer && S.timer.left <= 5;
@@ -3051,12 +3065,11 @@ define("js/views.js", function (require, module, exports) {
     var mine = g ? g.players[0].hand : [];
     var ds = dealState(S);
     var n = ds && !ds.done ? Math.min(mine.length, ds.arrived[0]) : mine.length;
-    // 横屏为左下南家座位牌预留 150px；竖屏南家已移至手牌区左上，手牌整行居中
-    var reserve = L.landscape ? 320 : 48;
-    var avail = W - reserve - L.hand.cardW;
+    // 手牌整行居中：南家座位牌已移到手牌正上方，不再占用左侧空间（竖/横屏一致）
+    var avail = W - 48 - L.hand.cardW;
     var step = n > 1 ? Math.min(L.hand.step, Math.max(26, avail / (n - 1))) : L.hand.step;
     var totalW = (n - 1) * step + L.hand.cardW;
-    var hx = Math.max(L.landscape ? 150 : 24, Math.round((W - totalW) / 2));
+    var hx = Math.max(24, Math.round((W - totalW) / 2));
 
     mine.slice(0, n).forEach(function (c, i) {
       var sel = S.selected.some(function (s) { return s.r === c.r && s.s === c.s; });
@@ -3241,6 +3254,9 @@ define("js/views.js", function (require, module, exports) {
       var rowGap = rows.length >= 3 ? 12 : 22;
       var blockH = rows.length * phh + (rows.length - 1) * rowGap;
       var top = L.center.y - blockH / 2 - 2;
+      // 横屏：牌桌带矮，摊牌行整体上提，保证「已抽 X/Y」不压底部状态条
+      if (L.landscape) top = Math.min(top, barY - blockH - 26);
+      top = Math.max(top, L.table.top + 8);
 
       // 配额进度/置灰仅用于独食抽牌方向（winners.length===1，多败方行，got 按每家计）；
       // 被抽方向只有一排且 drawnFrom 是跨胜方合计，cap 无意义，保持"N 张"不置灰；
@@ -3426,8 +3442,10 @@ define("js/views.js", function (require, module, exports) {
 
   function toast(ctx, S, L) {
     var w = 420, h = 54;
-    box(ctx, W / 2 - w / 2, L.H - 400, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
-    txt(ctx, S.toast, W / 2, L.H - 373, 17, C.text);
+    // 横屏牌桌带太矮，提示条放到手牌上方（不压出牌区）
+    var y0 = L.landscape ? L.hand.y - 66 : L.H - 400;
+    box(ctx, W / 2 - w / 2, y0, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
+    txt(ctx, S.toast, W / 2, y0 + 27, 17, C.text);
   }
 
   // ---------- 联机：大厅 / 房号键盘 / 房间等待 ----------
@@ -3606,7 +3624,7 @@ define("js/views.js", function (require, module, exports) {
     var shk = fxShake(S);
     ctx.save();
     if (shk) ctx.translate(shk.x, shk.y);
-    bg(ctx, H);
+    bg(ctx, L);
     if (S.phase === 'menu' || (S.lobby && !S.game)) {
       menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
