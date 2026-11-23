@@ -121,17 +121,18 @@
     voicePump();
   }
 
-  // 单张/对子/三个要报具体牌：花色词 + 点数词；其余牌型只报牌型
+  // 单张直接报「花色+点数」；对子/三个只补点数（不逐张念花色，避免播报过长）
   function detailFiles(kind, cards) {
-    var need = kind === 'single' ? 1 : kind === 'pair' ? 2 : kind === 'trio' ? 3 : 0;
-    if (!need || !cards || !cards.length) return [];
-    var list = cards.slice(0, need).sort(function (a, b) { return b.s - a.s; });
-    var out = [];
-    list.forEach(function (c) {
-      if (!c || c.r < 2 || c.r > 14 || c.s < 0 || c.s > 3) return;
-      out.push('s_' + c.s, 'r_' + c.r);
-    });
-    return out;
+    if (!cards || !cards.length) return [];
+    var list = cards.slice().sort(function (a, b) { return b.s - a.s; });
+    var c0 = list[0];
+    if (!c0 || c0.r < 2 || c0.r > 14) return [];
+    if (kind === 'single') {
+      if (c0.s < 0 || c0.s > 3) return [];
+      return ['s_' + c0.s, 'r_' + c0.r];
+    }
+    if (kind === 'pair' || kind === 'trio') return ['r_' + c0.r];
+    return [];
   }
 
   var bank = {
@@ -214,11 +215,12 @@
       }
     },
     toggle: function () { A.enabled = !A.enabled; resume(); return A.enabled; },
-    // 播报这手出了什么：牌型词 +（单张/对子/三个）具体花色点数，例如「单张 红桃5」「对子 黑桃K ♥K」
+    // 播报这手出了什么：单张直接报「梅花2」；对子/三个报「对子K」「三个3」；其余只报牌型
     say: function (kind, cards) {
       if (!A.enabled) return;
       var kindFile = kind && KIND_VOICE[kind];
       if (!kindFile) return;
+      if (kind === 'single') { voiceSpeak(detailFiles(kind, cards)); return; }
       voiceSpeak([kindFile].concat(detailFiles(kind, cards)));
     }
   };

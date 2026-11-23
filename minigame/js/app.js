@@ -645,6 +645,8 @@
       : spec.map(function (c) { return { r: c.r, s: c.s }; });
     for (var q = 1; q < 4; q++) g.players[q].hand = rest.splice(0, 13);
     sortHand(g.players[0].hand);
+    // 换牌后 ♠3/♠A 归属变了，阵营必须按新牌重算，否则独食/组队判定还是换牌前的旧结果
+    g.camp = GX.Camp.analyze(g.players.map(function (x) { return x.hand; }));
     // 先手按方块4 定：♦4 已换到主视角，回合也要同步给主视角，否则原 ♦4 持有者仍先出
     g.turn = 0;
     g.combo = null;
@@ -665,14 +667,9 @@
     S.tribute = null;
     S.busy = false;
     var seed = Math.floor(Math.random() * 4e9);
-    var cfg = S.cfg;
-    if (S.testDeck) { // 测试模式：关掉进贡，保证每局都是同一手特殊牌且 ♦4 先手
-      cfg = {};
-      for (var k in S.cfg) cfg[k] = S.cfg[k];
-      cfg.tributeEnabled = false;
-    }
-    S.game = GX.Table.createRound({ seed: seed, config: cfg });
-    if (S.testDeck) applyTestDeck(S.game); // 测试模式：主视角固定特殊牌
+    S.game = GX.Table.createRound({ seed: seed, config: S.cfg });
+    // 测试模式：只固定主视角这一手牌；进贡、结算、计分全走正常规则（赢了照样抽三家贡）
+    if (S.testDeck) applyTestDeck(S.game);
 
     // 发牌动画：52 张按逆时针一人一张，约 2.1 秒
     S.phase = 'deal';
@@ -697,7 +694,7 @@
     S.deal = null;
     if (!S.game) return;
 
-    if (S.mode === 'solo' && S.round >= 2 && S.cfg.tributeEnabled && !S.testDeck && S.lastResult) {
+    if (S.mode === 'solo' && S.round >= 2 && S.cfg.tributeEnabled && S.lastResult) {
       var plan = GX.Tribute.plan(S.lastResult, S.cfg);
       if (!plan.skip && plan.count > 0) {
         S.tribute = {
