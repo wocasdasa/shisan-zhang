@@ -204,8 +204,25 @@
       noise(0.08, 480, 0.42, 'lowpass');
       noise(0.08, 480, 0.42, 'lowpass', 0.18);
       noise(0.4, 3400, 0.2, 'highpass', 0.36);
+    },
+    // 收到发言：两声轻亮「叮叮」，比出牌音效轻，不抢戏
+    chat: function () {
+      tone(1320, 0.05, 0.09, 'triangle');
+      tone(1760, 0.06, 0.07, 'triangle', null, 0.07);
     }
   };
+
+  // ---------- 背景音乐（合成，无音频文件） ----------
+  // 极简民乐感五声循环：D 宫调，三角波 + 低八度垫音，音量很低，只做氛围
+  var musicTimer = null, musicStep = 0, musicOn = false;
+  var MUSIC_SCALE = [294, 330, 392, 440, 494, 587]; // D E G A B D
+  function musicTick() {
+    if (!musicOn || !ready) return;
+    var deg = MUSIC_SCALE[musicStep % MUSIC_SCALE.length];
+    tone(deg, 0.9, 0.035, 'triangle');
+    if (musicStep % 4 === 0) tone(deg / 2, 1.6, 0.028, 'sine');
+    musicStep++;
+  }
 
   var A = {
     enabled: true,
@@ -241,6 +258,20 @@
     },
     toggle: function () { A.enabled = !A.enabled; resume(); return A.enabled; },
     flush: voiceFlush,
+    // 背景音乐开关（合成，默认关）
+    music: function (on) {
+      musicOn = on !== false;
+      if (!musicOn) {
+        if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+        return false;
+      }
+      if (!ready) init();
+      resume();
+      if (!musicTimer) musicTimer = setInterval(musicTick, 1400);
+      musicTick();
+      return true;
+    },
+    musicIsOn: function () { return musicOn; },
     // 播报这手出了什么：单张直接报「梅花2」；对子/三个报「对子K」「三个3」；其余只报牌型
     say: function (kind, cards) {
       if (!A.enabled) return;

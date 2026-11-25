@@ -161,20 +161,68 @@ function joinRoom(conn, msg) {
 }
 
 function onJoin(conn, room, name, seat) {
-  const info = { conn, roomId: room.id, seat, name: String(name || '玩家').slice(0, 6) };
+  const key = newKey();
+  const info = { conn, roomId: room.id, seat, name: String(name || '玩家').slice(0, 6), key };
   conns.set(conn.id, info);
-  room.seats[seat] = { name: info.name, connId: conn.id, ready: false, ai: false };
+  room.seats[seat] = {
+    name: info.name, connId: conn.id, ready: false, ai: false, key, droppedAt: 0
+  };
   setEvent(room, info.name + ' 加入房间');
-  send(conn, { t: 'joined', room: room.id, seat });
+  send(conn, { t: 'joined', room: room.id, seat, key });
   broadcast(room);
 }
 
-function leaveRoom(conn) {
+function newKey() {
+  let s = '';
+  const abc = 'abcdefghijkmnpqrstuvwxyz23456789';
+  for (let i = 0; i < 8; i++) s += abc.charAt(Math.floor(Math.random() * abc.length));
+  return s;
+}
+
+// 断线重连：带 key 回来找回原座位（对局中也能回）
+function rejoinRoom(conn, msg) {
+  const room = rooms.get(String(msg.room || '').trim());
+  if (!room) { send(conn, { t: 'err', msg: '房间已解散' }); return; }
+  const seat = room.seats.findIndex((s) => s && !s.ai && s.key && s.key === String(msg.key || ''));
+  if (seat < 0) { send(conn, { t: 'err', msg: '座位已失效（超时被接管或已离桌）' }); return; }
+  const info = { conn, roomId: room.id, seat, name: room.seats[seat].name, key: room.seats[seat].key };
+  conns.set(conn.id, info);
+  room.seats[seat].connId = conn.id;
+  room.seats[seat].droppedAt = 0;
+  setEvent(room, info.name + ' 回到房间');
+  send(conn, { t: 'joined', room: room.id, seat, key: info.key, rejoin: true });
+  broadcast(room);
+}
+
+// 掉线：对局中先保留座位 90 秒（期间轮到他由超时逻辑代打），超时转 AI
+const DROP_GRACE_MS = 90000;
+
+function leaveRoom(conn, explicit) {
   const info = conns.get(conn.id);
   if (!info) return;
   const room = rooms.get(info.roomId);
   conns.delete(conn.id);
   if (!room) return;
+  const seat = room.seats[info.seat];
+  if (seat && room.phase !== 'wait') {
+    if (!explicit && seat.key === info.key) {
+      seat.connId = null;
+      seat.droppedAt = Date.now();
+      setEvent(room, seat.name + ' 掉线，座位保留 90 秒');
+      broadcast(room);
+      return;
+    }
+    // 对局中主动离开：座位交给机器人托管，避免四人局缺口
+    seat.connId = null;
+    seat.droppedAt = 0;
+    seat.ai = true;
+    setEvent(room, seat.name + ' 离开，由机器人托管');
+    broadcast(room);
+    if (room.phase === 'play' && room.game && !room.game.over && room.game.turn === info.seat) {
+      scheduleTurn(room);
+    }
+    return;
+  }
   room.seats[info.seat] = null;
   setEvent(room, '有人离开房间');
   if (room.phase === 'wait') {
@@ -182,6 +230,30 @@ function leaveRoom(conn) {
   }
   broadcast(room);
 }
+
+// 宽限期到：掉线座位交给 AI 托管，后续轮次不再等 20 秒
+setInterval(function () {
+  rooms.forEach(function (room) {
+    if (room.phase !== 'play' && room.phase !== 'tribute' && room.phase !== 'deal' && room.phase !== 'settle') return;
+    let changed = false;
+    room.seats.forEach(function (s) {
+      if (!s || s.ai || s.connId) return;
+      if (!s.droppedAt || Date.now() - s.droppedAt < DROP_GRACE_MS) return;
+      s.ai = true;
+      s.connId = null;
+      setEvent(room, s.name + ' 超时未回，已由机器人托管');
+      changed = true;
+    });
+    if (changed) {
+      broadcast(room);
+      if (room.phase === 'play' && room.game && !room.game.over) {
+        const t = room.game.turn;
+        if (room.seats[t] && room.seats[t].ai) scheduleTurn(room);
+      }
+    }
+  });
+}, 5000);
+
 
 // ---------- 开局 ----------
 function startRoom(room) {
@@ -573,6 +645,7 @@ function handle(conn, msg) {
   if (!msg || !msg.t) return;
   if (msg.t === 'create') { createRoom(conn, msg); return; }
   if (msg.t === 'join') { joinRoom(conn, msg); return; }
+  if (msg.t === 'rejoin') { rejoinRoom(conn, msg); return; }
   if (msg.t === 'ping') { send(conn, { t: 'pong', time: Date.now() }); return; }
 
   const info = conns.get(conn.id);
@@ -580,6 +653,8 @@ function handle(conn, msg) {
   const room = rooms.get(info.roomId);
   if (!room) { send(conn, { t: 'err', msg: '房间已解散' }); return; }
   const seat = info.seat;
+
+  if (msg.t === 'leave') { leaveRoom(conn, true); return; }
 
   if (DBG) console.log('[R' + room.round + '] 收到 ' + msg.t + ' seat=' + seat +
     (msg.cards ? ' 牌数=' + msg.cards.length : ''));

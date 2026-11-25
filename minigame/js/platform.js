@@ -161,6 +161,14 @@
     } catch (e) { return false; }
   }
 
+  // 轻震：微信 wx.vibrateShort，浏览器 navigator.vibrate
+  function haptic(kind) {
+    try {
+      if (isWx && wx.vibrateShort) { wx.vibrateShort({ type: kind || 'light' }); return; }
+      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(kind === 'heavy' ? 40 : 18);
+    } catch (e) {}
+  }
+
   var exportsObj = {
     isWx: isWx,
     init: init,
@@ -175,6 +183,7 @@
     debug: function () { return { tap: !!tapHandler, canvas: canvas === document.getElementById('game') }; },
     markDirty: function () { dirty = true; },
     askText: askText,
+    haptic: haptic,
     start: function (fn) { drawFn = fn; dirty = true; tick(); }
   };
 

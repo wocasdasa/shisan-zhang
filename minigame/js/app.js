@@ -47,7 +47,30 @@
     // 昵称 / 发言
     myName: '',
     chats: [],
-    chatOpen: false
+    chatOpen: false,
+    // 辅助与面板
+    auto: false,          // 托管
+    autoPending: false,
+    hintIdx: 0,           // 提示候选轮换游标
+    recordOpen: false,    // 记牌器
+    toolsOpen: false,     // 更多（工具抽屉）
+    statsOpen: false,     // 战绩
+    replayOpen: false,    // 复盘
+    guideOpen: false,     // 新手引导
+    guidePage: 0,
+    vibOn: true,
+    skin: 0,              // 牌背皮肤
+    stats: null,          // 本地战绩
+    replay: [],           // 本局出牌序列（复盘用）
+    rejoin: null,         // {room, key} 断线重连凭据
+    reconnecting: false,
+    leaving: false,       // 主动离开：不触发重连
+    reconnectTries: 0,
+    lastChatTs: 0,        // 最近一次播过提示音的发言
+    streakNow: 0,
+    lastSettleKey: '',
+    guideDone: false,
+    musicOn: false
   };
 
   var toastTimer = null;
@@ -95,6 +118,8 @@
     var firstTurn = !S.game || S.game.lastPlayer === undefined || S.game.lastPlayer < 0;
     var baseSec = (S.cfg && S.cfg.turnSeconds) || TURN_SECONDS;
     S.timer.left = firstTurn ? baseSec * 2 : baseSec;
+    S.hintIdx = 0;
+    armAuto();
     SFX.play('turn');
     S.timer.id = setInterval(function () {
       S.timer.left--;
@@ -117,6 +142,7 @@
     if (g.combo && GX.Table.pass(g, 0) === null) {
       S.hint = '超时：自动跳过（过牌）';
       SFX.play('pass');
+      recordRow(0, null, true);
       P.markDirty();
       scheduleAI();
       return;
@@ -124,8 +150,10 @@
     var cands = GX.Moves.candidates(g.players[0].hand, S.cfg);
     var ok = cands.filter(function (c) { return GX.Table.validate(g, 0, c.cards) === null; });
     if (ok.length) {
-      GX.Table.play(g, 0, GX.Moves.lowest(ok).cards);
+      var low = GX.Moves.lowest(ok);
+      GX.Table.play(g, 0, low.cards);
       S.hint = '超时：起手必须出牌，已出最小牌';
+      recordRow(0, low.cards, false);
       fxPlayed(g, 0);
       P.markDirty();
       maybeFinishRound();
@@ -142,10 +170,12 @@
     var hand = S.game.players[0].hand;
     var c = hand[i];
     if (!c) return;
+    if (S.auto) cancelAuto(true);   // 主动选牌＝收回托管
     var idx = S.selected.findIndex(function (s) { return sameCard(s, c); });
     if (idx >= 0) S.selected.splice(idx, 1);
     else S.selected.push(c);
     S.hint = '';
+    S.hintIdx = 0;
     SFX.play('select');
     P.markDirty();
   }
@@ -156,9 +186,12 @@
       if (S.game.turn !== 0) { S.hint = '还没轮到你'; P.markDirty(); return; }
       var onCards = S.selected.slice();
       if (!onCards.length) { S.hint = '先选牌'; P.markDirty(); return; }
+      if (S.auto) cancelAuto(true);
       NET.send({ t: 'play', cards: onCards });
+      recordRow(0, onCards, false);
       S.selected = [];
       S.hint = '';
+      S.hintIdx = 0;
       P.markDirty();
       return;
     }
@@ -167,9 +200,12 @@
     if (!cards.length) { S.hint = '先选牌'; P.markDirty(); return; }
     var err = GX.Table.validate(g, 0, cards);
     if (err) { S.hint = explain(err); P.markDirty(); return; }
+    if (S.auto) cancelAuto(true);
     GX.Table.play(g, 0, cards);
+    recordRow(0, cards, false);
     S.selected = [];
     S.hint = '';
+    S.hintIdx = 0;
     fxPlayed(g, 0);
     P.markDirty();
     maybeFinishRound();
@@ -177,49 +213,60 @@
   }
 
   function doPass() {
+    if (S.auto) cancelAuto(true);
     if (S.mode === 'online') {
       NET.send({ t: 'pass' });
+      recordRow(0, null, true);
       S.selected = [];
       P.markDirty();
       return;
     }
     var err = GX.Table.pass(S.game, 0);
     if (err) { S.hint = explain(err); P.markDirty(); return; }
+    recordRow(0, null, true);
     S.selected = [];
     SFX.play('pass');
     P.markDirty();
     scheduleAI();
   }
 
+  // 提示：点一下换一种打法。候选按牌力从小到大排，超出范围就过滤掉
   function doHint() {
     var g = S.game;
     if (!g || g.turn !== 0) return;
+    var cands = GX.Moves.candidates(g.players[0].hand, S.cfg);
+    var ok;
     if (S.mode === 'online') {
-      var cs = GX.Moves.candidates(g.players[0].hand, S.cfg);
-      if (g.combo) {
-        cs = cs.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; });
-      }
       if (g.firstPlayPending) {
-        cs = cs.filter(function (c) {
+        cands = cands.filter(function (c) {
           return c.cards.some(function (x) { return x.r === 4 && x.s === 0; });
         });
       }
-      var pick2 = GX.Moves.lowest(cs);
-      if (!pick2) { S.hint = g.combo ? '这手压不过，只能过牌' : '没有合法牌型'; P.markDirty(); return; }
-      S.selected = pick2.cards.slice();
-      S.hint = '提示：' + GX.Hand.kindLabel(pick2.combo.kind);
+      ok = cands;
+      if (g.combo) ok = ok.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; });
+    } else {
+      ok = cands.filter(function (c) { return GX.Table.validate(g, 0, c.cards) === null; });
+      if (g.combo) ok = ok.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; });
+    }
+    if (!ok.length) {
+      S.hint = g.combo ? '这手压不过，只能过牌' : '没有合法牌型';
       P.markDirty();
       return;
     }
-    var cands = GX.Moves.candidates(g.players[0].hand, S.cfg);
-    var ok = cands.filter(function (c) { return GX.Table.validate(g, 0, c.cards) === null; });
-    if (!ok.length) { S.hint = g.combo ? '这手压不过，只能过牌' : '没有合法牌型'; P.markDirty(); return; }
-    var pick = g.combo
-      ? GX.Moves.lowest(ok.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; }))
-      : GX.Moves.lowest(ok);
-    if (!pick) { S.hint = '压不过'; P.markDirty(); return; }
+    // 同一组牌型只留最小的一手，按牌力升序，逐个轮换
+    var uniq = [];
+    ok.forEach(function (c) {
+      var k = GX.Hand.kindLabel(c.combo.kind) + '|' + c.cards.length + '|' +
+        c.cards.map(function (x) { return x.r + '.' + x.s; }).sort().join(',');
+      if (!uniq.some(function (u) { return u.k === k; })) uniq.push({ k: k, c: c });
+    });
+    uniq.sort(function (a, b) { return GX.Hand.compare(a.c.combo, b.c.combo); });
+    S.hintIdx = (S.hintIdx + 1) % uniq.length;
+    var pick = uniq[S.hintIdx].c;
     S.selected = pick.cards.slice();
-    S.hint = '提示：' + GX.Hand.kindLabel(pick.combo.kind);
+    S.hint = '提示 ' + (S.hintIdx + 1) + '/' + uniq.length + '：' + GX.Hand.kindLabel(pick.combo.kind) +
+      '（再点换一换）';
+    SFX.play('select');
     P.markDirty();
   }
 
@@ -285,6 +332,7 @@
     SFX.playKind(k);
     SFX.say(k, S.fx.cards); // 语音播报这手牌型（单张报点数）
     S.fx.seatPlay = { p: seat, t0: Date.now() };
+    if (seat === 0 && S.vibOn) P.haptic('heavy');
     fxIdentityCards(last && last.cards, seat); // 本手含 ♠3/♠A → 身份特效
     fxLoneCheck(); // 出牌后直接判：revealedCards 齐 ♠3+♠A → 独食揭示
   }
@@ -301,6 +349,7 @@
       var action = S.level === 0 ? GX.AI.decide(S.game, p) : GX.AI2.decide(S.game, p, S.level);
       if (action.type === 'play') {
         GX.Table.play(S.game, p, action.cards);
+        recordRow(p, action.cards, false);
         SFX.play('play');
         S.hint = '';
         S.fx.playT0 = Date.now();
@@ -316,10 +365,13 @@
         fxIdentityCards(tl && tl.cards, p); // 与 fxPlayed 同一触发口径：♠3/♠A 亮出
         fxLoneCheck(); // 与 fxPlayed 同一口径：独食揭示
       } else if (GX.Table.pass(S.game, p)) {
+        recordRow(p, null, true);
         var cands = GX.Moves.candidates(S.game.players[p].hand, S.cfg);
         var ok = cands.filter(function (c) { return GX.Table.validate(S.game, p, c.cards) === null; });
         if (ok.length) {
-          GX.Table.play(S.game, p, GX.Moves.lowest(ok).cards);
+          var lowAI = GX.Moves.lowest(ok);
+          GX.Table.play(S.game, p, lowAI.cards);
+          recordRow(p, lowAI.cards, false);
           fxPlayed(S.game, p);
         } else {
           SFX.play('pass');
@@ -341,6 +393,10 @@
     S.phase = 'settle';
     S.deal = null;
     S.fx.settleT0 = Date.now();
+    // 战绩：只统计「我」这一侧；连胜在结算页显示
+    var st = recordResult(res.scores[0]);
+    S.streakNow = st.streak;
+    if (S.vibOn) P.haptic('light');
     SFX.play(res.scores[0] > 0 ? 'win' : res.scores[0] < 0 ? 'lose' : 'pass');
     P.markDirty();
     if (AUTO) setTimeout(function () { onNext(); }, 900);
@@ -398,19 +454,211 @@
   var CHAT_EMOJI = ['😀', '😄', '😎', '🤔', '😭', '😡', '👍', '👏', '🎉', '🃏', '🙏', '🤝', '💤', '🔥', '🍀', '👀'];
   var CHAT_PHRASES = ['快点吧', '出牌真快', '承让了', '别催我', '我再想想', '再来一局', '这牌没法打', '稳住别浪'];
 
+  // ---------- 本地存档（战绩 / 引导 / 震动 / 皮肤） ----------
+  function storageGet(key, def) {
+    try {
+      var raw;
+      if (typeof wx !== 'undefined' && wx.getStorageSync) raw = wx.getStorageSync(key);
+      else if (typeof localStorage !== 'undefined') raw = localStorage.getItem(key);
+      if (raw === '' || raw === undefined || raw === null) return def;
+      if (typeof raw !== 'string') return raw;
+      var t = raw.trim();
+      if (t.charAt(0) === '{' || t.charAt(0) === '[') {
+        try { return JSON.parse(t); } catch (e) { return def; }
+      }
+      return raw;
+    } catch (e) {}
+    return def;
+  }
+
+  function storageSet(key, val) {
+    try {
+      if (val === null || val === undefined) {
+        if (typeof wx !== 'undefined' && wx.removeStorageSync) { wx.removeStorageSync(key); return; }
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(key);
+        return;
+      }
+      if (typeof wx !== 'undefined' && wx.setStorageSync) { wx.setStorageSync(key, val); return; }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val));
+      }
+    } catch (e) {}
+  }
+
+  var STATS_KEY = 'gx13_stats';
+  var GUIDE_KEY = 'gx13_guide_done';
+
+  function loadStats() {
+    var d = storageGet(STATS_KEY, null);
+    if (!d || typeof d !== 'object') d = {};
+    return {
+      games: d.games || 0, wins: d.wins || 0, losses: d.losses || 0, draws: d.draws || 0,
+      streak: d.streak || 0, bestStreak: d.bestStreak || 0, best: d.best || 0,
+      history: Array.isArray(d.history) ? d.history.slice(-20) : [],
+      top: Array.isArray(d.top) ? d.top.slice(0, 5) : []
+    };
+  }
+
+  // 一局结束记一笔：我的本局分 > 0 记胜，< 0 记负，= 0 记平
+  function recordResult(myScore) {
+    var st = S.stats || loadStats();
+    st.games++;
+    if (myScore > 0) { st.wins++; st.streak = st.streak > 0 ? st.streak + 1 : 1; }
+    else if (myScore < 0) { st.losses++; st.streak = st.streak < 0 ? st.streak - 1 : -1; }
+    else { st.draws++; st.streak = 0; }
+    st.bestStreak = Math.max(st.bestStreak || 0, st.streak);
+    st.best = Math.max(st.best || 0, myScore);
+    st.history.push({ t: Date.now(), score: myScore, win: myScore > 0 ? 1 : myScore < 0 ? -1 : 0, mode: S.mode });
+    if (st.history.length > 20) st.history = st.history.slice(-20);
+    // 本机排行榜：单局分前 5（本地存，不上云）
+    st.top = Array.isArray(st.top) ? st.top : [];
+    st.top.push({ score: myScore, t: Date.now() });
+    st.top.sort(function (a, b) { return b.score - a.score; });
+    st.top = st.top.slice(0, 5);
+    S.stats = st;
+    storageSet(STATS_KEY, st);
+    return st;
+  }
+
+  function recordRow(seat, cards, pass) {
+    S.replay.push({
+      seat: seat, pass: !!pass,
+      cards: (cards || []).slice().map(function (c) { return { r: c.r, s: c.s }; })
+    });
+    if (S.replay.length > 240) S.replay.splice(0, S.replay.length - 240);
+  }
+
+  // 记牌器：52 张里减去我手上的和场上已经打出的，得到外面还剩几张（按点数 4..14 计）
+  function remainingByRank() {
+    var cnt = {};
+    for (var r = 4; r <= 14; r++) cnt[r] = 4;
+    var g = S.game;
+    var mine = (g && g.players && g.players[0]) ? g.players[0].hand : [];
+    mine.forEach(function (c) { if (cnt[c.r] !== undefined) cnt[c.r]--; });
+    ((g && g.trickPlays) || []).forEach(function (pl) {
+      (pl.cards || []).forEach(function (c) { if (cnt[c.r] !== undefined) cnt[c.r]--; });
+    });
+    // 进贡抽走的牌也是从别人手里出来，仍在场上（没打出），不用额外扣
+    var out = [];
+    for (var x = 14; x >= 4; x--) out.push({ r: x, n: Math.max(0, cnt[x]) });
+    return out;
+  }
+
+  // 分享文案：本场分 + 连胜（微信被动分享与主动分享共用）
+  function shareText() {
+    var st = S.stats || loadStats();
+    var total = S.scores[0] || 0;
+    return '十三张·独食：本场 ' + (total > 0 ? '+' + total : total) + ' 分' +
+      (st.streak > 1 ? '，' + st.streak + ' 连胜' : '') + '，来一局？';
+  }
+
+  // 分享战绩：微信走原生分享，浏览器退化到复制文本
+  function shareResult() {
+    var title = shareText();
+    try {
+      if (typeof wx !== 'undefined' && wx.shareAppMessage) {
+        wx.shareAppMessage({ title: title, imageUrl: '' });
+        return;
+      }
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        navigator.clipboard.writeText(title);
+        toast('战绩文案已复制，可粘贴分享');
+        return;
+      }
+    } catch (e) {}
+    toast(title);
+  }
+
+  // ---------- 托管：轮到我且长时间没操作，自动出最小合法牌 / 过牌 ----------
+  function cancelAuto(quiet) {
+    if (!S.auto) return;
+    S.auto = false;
+    S.autoPending = false;
+    if (!quiet) toast('已取消托管');
+    P.markDirty();
+  }
+
+  function autoAct() {
+    S.autoPending = false;
+    if (!S.auto) return;
+    var g = S.game;
+    if (!g || g.over || S.phase !== 'play' || g.turn !== 0 || S.busy) return;
+    var cands = GX.Moves.candidates(g.players[0].hand, S.cfg);
+    var ok = cands.filter(function (c) { return GX.Table.validate(g, 0, c.cards) === null; });
+    if (S.mode === 'online') {
+      if (!ok.length) { S.hint = '托管：无牌可出，自动过牌'; NET.send({ t: 'pass' }); P.markDirty(); return; }
+      var pick = g.combo
+        ? GX.Moves.lowest(ok.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; }))
+        : GX.Moves.lowest(ok);
+      if (!pick) { S.hint = '托管：压不过，自动过牌'; NET.send({ t: 'pass' }); P.markDirty(); return; }
+      S.selected = pick.cards.slice();
+      S.hint = '托管：自动出 ' + GX.Hand.kindLabel(pick.combo.kind);
+      NET.send({ t: 'play', cards: pick.cards });
+      S.selected = [];
+      P.markDirty();
+      return;
+    }
+    if (!ok.length) {
+      if (g.combo && GX.Table.pass(g, 0) === null) {
+        S.hint = '托管：自动过牌';
+        S.selected = [];
+        SFX.play('pass');
+        recordRow(0, null, true);
+        P.markDirty();
+        scheduleAI();
+        return;
+      }
+      S.hint = '托管：没有可出的牌';
+      P.markDirty();
+      return;
+    }
+    var p2 = g.combo
+      ? GX.Moves.lowest(ok.filter(function (c) { return GX.Hand.compare(c.combo, g.combo) > 0; }))
+      : GX.Moves.lowest(ok);
+    if (p2) {
+      GX.Table.play(g, 0, p2.cards);
+      S.selected = [];
+      S.hint = '托管：自动出 ' + GX.Hand.kindLabel(p2.combo.kind);
+      recordRow(0, p2.cards, false);
+      fxPlayed(g, 0);
+      P.markDirty();
+      maybeFinishRound();
+      scheduleAI();
+      return;
+    }
+    S.hint = '托管：压不过，只能过牌';
+    P.markDirty();
+  }
+
+  function armAuto() {
+    if (!S.auto || S.autoPending) return;
+    if (!S.game || S.phase !== 'play' || S.game.turn !== 0 || S.busy) return;
+    S.autoPending = true;
+    setTimeout(autoAct, 1100);
+  }
+
 
   function bindNet() {
     if (netBound) return;
     netBound = true;
     NET.on('open', function () {
       S.netStatus = '已连接';
-      if (S.pending) { var pj = S.pending; S.pending = null; NET.send(pj); }
+      if (S.reconnecting && S.rejoin) {
+        NET.send({ t: 'rejoin', room: S.rejoin.room, key: S.rejoin.key });
+        S.pending = null;
+      } else if (S.pending) {
+        var pj = S.pending; S.pending = null; NET.send(pj);
+      }
       if (S.lobby) S.lobby.err = '';
-      toast('已连接服务器');
+      if (!S.reconnecting) toast('已连接服务器');
       P.markDirty();
     });
     NET.on('close', function () {
       S.netStatus = '连接断开';
+      if (S.mode === 'online' && S.rejoin && !S.leaving) {
+        tryReconnect();
+        return;
+      }
       toast('连接断开');
       P.markDirty();
     });
@@ -422,8 +670,32 @@
     NET.on('message', onNetMessage);
   }
 
-  function netJoinServer() {
-    bindNet();
+  // 断线重连：掉线后按 1.5s 间隔重试，最多 8 次；重连成功发 rejoin 拿回原座位
+  function tryReconnect() {
+    if (!S.rejoin || S.reconnectTries >= 8) {
+      S.reconnecting = false;
+      toast('重连失败，请回大厅重新进房');
+      P.markDirty();
+      return;
+    }
+    S.reconnecting = true;
+    S.reconnectTries = (S.reconnectTries || 0) + 1;
+    S.netStatus = '重连中 ' + S.reconnectTries + '/8';
+    toast('连接断了，正在重连…');
+    P.markDirty();
+    setTimeout(function () {
+      if (!S.reconnecting) return;
+      NET.connect();
+      // 有些平台不回调 onClose→onOpen，这里用状态兜底再发一次
+      setTimeout(function () {
+        if (S.reconnecting && S.netStatus === '已连接' && S.rejoin) {
+          NET.send({ t: 'rejoin', room: S.rejoin.room, key: S.rejoin.key });
+        }
+      }, 800);
+    }, 1500);
+  }
+
+  function netJoinServer() {    bindNet();
     if (S.netStatus === '已连接') return true;
     S.netStatus = '连接中…';
     NET.connect();
@@ -440,6 +712,10 @@
   }
 
   function backToSolo() {
+    S.leaving = true;
+    S.reconnecting = false;
+    S.rejoin = null;
+    try { storageSet('gx13_rejoin', null); } catch (e) {}
     if (S.mode === 'online') { NET.send({ t: 'leave' }); NET.close(); }
     SFX.flush();
     S.mode = 'solo';
@@ -456,6 +732,8 @@
   }
 
   function netCreate() {
+    S.leaving = false;
+    S.reconnectTries = 0;
     var ready = netJoinServer();
     var msg = { t: 'create', name: myName(), rounds: S.rounds, cfg: S.roomCfg };
     if (ready) NET.send(msg); else S.pending = msg;
@@ -465,6 +743,8 @@
 
   function netJoin(code) {
     if (!code || code.length !== 4) { S.lobby.err = '房间号是 4 位数字'; P.markDirty(); return; }
+    S.leaving = false;
+    S.reconnectTries = 0;
     var ready = netJoinServer();
     var msg = { t: 'join', name: myName(), room: code };
     if (ready) NET.send(msg); else S.pending = msg;
@@ -476,7 +756,15 @@
     if (m.t === 'joined') {
       S.room = m.room;
       S.lobby = null;
-      toast('已进入房间 ' + m.room);
+      if (m.key) {
+        S.rejoin = { room: m.room, key: m.key };
+        storageSet('gx13_rejoin', S.rejoin);
+      }
+      S.chatSeenTs = 0;
+      S.reconnecting = false;
+      S.reconnectTries = 0;
+      S.leaving = false;
+      toast(m.rejoin ? '已回到房间 ' + m.room : '已进入房间 ' + m.room);
       P.markDirty();
       return;
     }
@@ -566,6 +854,12 @@
       fxPlayed(S.game, last.player);
     }
     S.prevPlays = v.phase === 'play' ? plays : 0;
+    // 线上复盘：直接用服务端出牌序列（过牌不记录）
+    if (S.game && S.game.trickPlays.length) {
+      S.replay = S.game.trickPlays.map(function (pl) {
+        return { seat: pl.player, cards: pl.cards, pass: false };
+      }).slice(-240);
+    }
 
     // 身份牌增量：新亮出的 ♠3/♠A（revealedCards 只记录身份牌点数）触发同组 fx 字段
     if (prevRc && S.game) {
@@ -584,9 +878,18 @@
       S.hint = v.turn === 0 ? (v.combo ? '轮到你，压不过可过牌' : '你起手，必须出牌') : SEAT_NAMES[v.turn] + ' 出牌中';
       if (v.deadline) startNetTimer(v.deadline);
       else clearTurnTimer();
+      if (v.turn === 0) armAuto();
     } else {
       clearTurnTimer();
       if (v.phase !== 'tribute') S.hint = '';
+    }
+    // 别人发言时给一声轻「叮」（新到的条目 ts≈现在，历史条目被压到 8 秒前）
+    if (S.chats.length) {
+      var nc = S.chats[S.chats.length - 1];
+      if (nc.ts > (S.lastChatTs || 0) && Date.now() - nc.ts < 2000) {
+        S.lastChatTs = nc.ts;
+        if (nc.rel !== 0) SFX.play('chat');
+      }
     }
 
     if (v.phase === 'tribute' && v.tribute) {
@@ -641,6 +944,14 @@
       if (!S.fx.settleT0) {
         S.fx.settleT0 = Date.now();
         SFX.play(R.scores[0] > 0 ? 'win' : R.scores[0] < 0 ? 'lose' : 'pass');
+        // 联机结算也只记一次
+        var sk = S.room + '#' + v.round;
+        if (S.lastSettleKey !== sk) {
+          S.lastSettleKey = sk;
+          var rs = recordResult(R.scores[0] || 0);
+          S.streakNow = rs.streak;
+          if (S.vibOn) P.haptic('light');
+        }
       }
     } else if (v.phase !== 'settle') {
       S.lastResult = null;
@@ -666,6 +977,7 @@
     S.phase = 'idle';
     S.game = null;
     S.resetPending = 0;
+    S.replay = [];
     startRound();
   }
 
@@ -719,6 +1031,8 @@
     S.round++;
     S.selected = [];
     S.hint = '';
+    S.hintIdx = 0;
+    S.replay = [];
     S.summary = false;
     S.fx = {};
     S.tribute = null;
@@ -1151,8 +1465,22 @@
     drag.seen = {};
   }
 
+  // 弹层打开时吞掉下层点击（引导/战绩/复盘/抽屉/发言都是模态）
+  function modalBlocked(act) {
+    if (S.guideOpen) return !/^guide/.test(act);
+    if (S.statsOpen) return act !== 'statsClose';
+    if (S.replayOpen) return act !== 'replayClose';
+    if (S.toolsOpen) {
+      return !(act === 'toolsClose' || act === 'stats' || act === 'replay' || act === 'guide' ||
+        act === 'share' || act === 'music' || act === 'vib' || act === 'skin' || act === 'record');
+    }
+    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText');
+    return false;
+  }
+
   function onTap(x, y) {
     SFX.unlock();
+    if (S.musicOn && !SFX.musicIsOn()) SFX.music(true);
     if (S.phase === 'deal') {
       if (S.mode === 'online') { S.deal = null; P.markDirty(); return; }
       finishDeal();
@@ -1162,6 +1490,7 @@
     for (var i = hits.length - 1; i >= 0; i--) {
       var h = hits[i];
       if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
+        if (modalBlocked(h.act)) return;
         if (h.act === 'card') {
           var c0 = handCardAt(h.i);
           if (c0 && S.tribute && S.tribute.stage === 'return') { toggleReturnSelect(c0); return; }
@@ -1247,6 +1576,70 @@
     if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
     if (h.act === 'chatText') { sendChat('text', h.text); return; }
     if (h.act === 'card') { tapCard(h.i); return; }
+    if (h.act === 'auto') {
+      if (S.auto) { cancelAuto(); return; }
+      S.auto = true;
+      toast('托管已开：轮到你自动挑最小牌');
+      armAuto();
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'tools') { S.toolsOpen = !S.toolsOpen; if (S.toolsOpen) S.recordOpen = false; P.markDirty(); return; }
+    if (h.act === 'toolsClose') { S.toolsOpen = false; P.markDirty(); return; }
+    if (h.act === 'stats') { S.statsOpen = true; S.toolsOpen = false; S.stats = loadStats(); P.markDirty(); return; }
+    if (h.act === 'statsClose') { S.statsOpen = false; P.markDirty(); return; }
+    if (h.act === 'record') {
+      S.recordOpen = !S.recordOpen;
+      S.toolsOpen = false;
+      if (S.recordOpen) toast('记牌器已展开：手牌下方显示各点数剩余');
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'recordClose') { S.recordOpen = false; P.markDirty(); return; }
+    if (h.act === 'replay') { S.replayOpen = true; P.markDirty(); return; }
+    if (h.act === 'replayClose') { S.replayOpen = false; P.markDirty(); return; }
+    if (h.act === 'guide') { S.guideOpen = true; S.guidePage = 0; P.markDirty(); return; }
+    if (h.act === 'guidePrev') { S.guidePage = Math.max(0, (S.guidePage || 0) - 1); P.markDirty(); return; }
+    if (h.act === 'guideNext') {
+      S.guidePage = Math.min(2, (S.guidePage || 0) + 1);
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'guideDone') {
+      S.guideOpen = false;
+      storageSet(GUIDE_KEY, '1');
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'guideClose') {
+      S.guideOpen = false;
+      storageSet(GUIDE_KEY, '1');
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'share') { shareResult(); return; }
+    if (h.act === 'music') {
+      S.musicOn = SFX.music(!SFX.musicIsOn());
+      storageSet('gx13_music', S.musicOn ? '1' : '0');
+      toast(S.musicOn ? '背景音乐已开' : '背景音乐已关');
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'vib') {
+      S.vibOn = !S.vibOn;
+      storageSet('gx13_vib', S.vibOn ? '1' : '0');
+      if (S.vibOn) P.haptic('light');
+      toast(S.vibOn ? '震动已开' : '震动已关');
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'skin') {
+      S.skin = ((S.skin || 0) + 1) % 3;
+      storageSet('gx13_skin', String(S.skin));
+      toast('牌背：' + ['经典红', '青竹', '鎏金'][S.skin]);
+      P.markDirty();
+      return;
+    }
     if (h.act === 'play') { doPlay(); return; }
     if (h.act === 'pass') { doPass(); return; }
     if (h.act === 'hint') { doHint(); return; }
@@ -1321,7 +1714,48 @@
     S.myName = loadName();
     S.chatEmoji = CHAT_EMOJI;
     S.chatPhrases = CHAT_PHRASES;
+    // 本地偏好与战绩
+    S.vibOn = storageGet('gx13_vib') !== '0';
+    var sk = parseInt(storageGet('gx13_skin') || '0', 10);
+    S.skin = (sk >= 0 && sk <= 2) ? sk : 0;
+    S.musicOn = storageGet('gx13_music') === '1';
+    S.stats = loadStats();
+    S.guideDone = storageGet(GUIDE_KEY) === '1';
+    var isDemo = false;
+    try {
+      isDemo = /demo=/.test((window.location && window.location.search) || '');
+    } catch (e) {}
+    if (!S.guideDone && !isDemo) { S.guideOpen = true; S.guidePage = 0; }
+    // 预览调试开关：?tools=1 / stats=1 / record=1 / replay=1 / guide=1
+    try {
+      var qs = (window.location && window.location.search) || '';
+      if (/tools=1/.test(qs)) S.toolsOpen = true;
+      if (/stats=1/.test(qs)) { S.statsOpen = true; S.stats = loadStats(); }
+      if (/record=1/.test(qs)) S.recordOpen = true;
+      if (/guide=1/.test(qs)) { S.guideOpen = true; S.guidePage = 0; }
+      var msk = /skin=(\d)/.exec(qs);
+      if (msk) S.skin = Math.min(2, Math.max(0, parseInt(msk[1], 10) || 0));
+      if (/replay=1/.test(qs) && !S.replay.length) {
+        S.replayOpen = true;
+        S.replay = [
+          { seat: 0, cards: [{ r: 4, s: 0 }, { r: 5, s: 1 }, { r: 6, s: 1 }, { r: 7, s: 2 }, { r: 8, s: 3 }], pass: false },
+          { seat: 1, cards: null, pass: true },
+          { seat: 2, cards: [{ r: 9, s: 3 }, { r: 10, s: 3 }, { r: 11, s: 3 }, { r: 12, s: 0 }, { r: 13, s: 2 }], pass: false },
+          { seat: 3, cards: null, pass: true },
+          { seat: 0, cards: null, pass: true },
+          { seat: 1, cards: [{ r: 14, s: 3 }, { r: 2, s: 3 }], pass: false },
+          { seat: 2, cards: [{ r: 3, s: 2 }], pass: false }
+        ];
+      }
+    } catch (e) {}
     P.bindTap(onTap);
+    // 微信被动分享（右上角菜单 / 长按转发）也带战绩文案
+    try {
+      if (typeof wx !== 'undefined' && wx.onShareAppMessage) {
+        if (wx.showShareMenu) wx.showShareMenu({ withShareTicket: false });
+        wx.onShareAppMessage(function () { return { title: shareText() }; });
+      }
+    } catch (e) {}
     if (P.bindMove) P.bindMove(onDrag);
     if (P.bindEnd) P.bindEnd(onDragEnd);
     P.start(draw);
@@ -1497,6 +1931,36 @@
         { rel: 2, kind: 'emoji', text: '😭', ts: t0c - 3000 },
         { rel: 0, kind: 'text', text: '马上就好', ts: t0c - 800 }
       ];
+    }
+    // 预览用：&settle=1 停在结算页，核对分享/复盘按钮与连胜文案
+    if (typeof window !== 'undefined' && window.location &&
+        /settle=1/.test(window.location.search || '')) {
+      S.stats = {
+        games: 12, wins: 7, losses: 4, draws: 1, streak: 3, bestStreak: 4, best: 96,
+        history: [
+          { t: Date.now() - 86400000, score: 96, win: 1 },
+          { t: Date.now() - 43200000, score: 24, win: 1 },
+          { t: Date.now() - 21600000, score: -18, win: -1 },
+          { t: Date.now() - 3600000, score: 48, win: 1 },
+          { t: Date.now() - 600000, score: 30, win: 1 }
+        ],
+        top: [
+          { score: 96, t: Date.now() - 86400000 },
+          { score: 48, t: Date.now() - 3600000 },
+          { score: 30, t: Date.now() - 600000 },
+          { score: 24, t: Date.now() - 43200000 },
+          { score: -18, t: Date.now() - 21600000 }
+        ]
+      };
+      S.scores = [-6, 12, 12, -6];
+      S.lastResult = {
+        camp: { mode: 'team', lone: -1, teamA: [0, 2], teamB: [1, 3] },
+        ranks: [1, 2, 0, 3],
+        scores: [30, -12, -12, 6],
+        winRanks: [1, 2]
+      };
+      S.phase = 'settle';
+      S.fx.settleT0 = Date.now() - 400;
     }
     P.markDirty();
   }

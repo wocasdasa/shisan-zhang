@@ -33,7 +33,7 @@
   // 所以这套「以底边为锚」的绝对节奏在两种方向都成立（竖屏 1334 高只是上下更宽松）。
   function layout(H) {
     var landscape = (W / H) >= 1.2;
-    var headerH = 96;
+    var headerH = 118;                 // 第二排工具 chip 需要高度（托管/记牌/更多）
     var seatW = 176, seatH = 64;
     var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
     var handY = H - 152;               // 手牌顶边：底部留 手牌 100 + 52 边距（手牌贴底排）
@@ -84,11 +84,20 @@
     if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
   }
 
+  // 牌背皮肤：0 经典红 / 1 青竹 / 2 鎏金（S.skin 决定，draw 时同步）
+  var SKIN = 0;
+  var SKINS = [
+    { fill: '#8c2f2a', line: 'rgba(255,225,205,0.5)', deco: 'rgba(255,225,205,0.35)' },
+    { fill: '#2b5c47', line: 'rgba(214,240,225,0.5)', deco: 'rgba(214,240,225,0.32)' },
+    { fill: '#6d5423', line: 'rgba(255,238,196,0.55)', deco: 'rgba(255,238,196,0.35)' }
+  ];
+
   function drawBack(ctx, x, y, w, h) {
-    box(ctx, x, y, w, h, Math.max(3, w * 0.1), '#2c5170', 'rgba(230,240,250,0.45)');
+    var sk = SKINS[SKIN] || SKINS[0];
+    box(ctx, x, y, w, h, Math.max(3, w * 0.1), sk.fill, sk.line);
     ctx.save();
     ctx.globalAlpha = 0.35;
-    ctx.strokeStyle = '#dce9f5';
+    ctx.strokeStyle = sk.deco;
     ctx.lineWidth = 1;
     for (var i = 1; i < 4; i++) {
       ctx.beginPath();
@@ -170,12 +179,13 @@
   }
 
   function drawBack(ctx, x, y, w, h) {
+    var sk = SKINS[SKIN] || SKINS[0];
     var r = Math.max(4, w * 0.08);
-    box(ctx, x, y, w, h, r, '#172943', 'rgba(216,179,106,0.35)');
+    box(ctx, x, y, w, h, r, sk.fill, sk.line);
     ctx.save();
     rr(ctx, x, y, w, h, r);
     ctx.clip();
-    ctx.strokeStyle = 'rgba(216,179,106,0.28)';
+    ctx.strokeStyle = sk.deco;
     ctx.lineWidth = 1;
     var step = Math.max(6, w / 9);
     for (var i = -h; i < w; i += step) {
@@ -729,6 +739,30 @@
     box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
     txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
+
+    // 第二排：辅助工具（托管 / 记牌 / 更多），右对齐，避开左侧标题与副标题
+    var y2 = 72, h2 = 36, fs2 = 14, rad2 = 18, gap2 = 8;
+    var x2 = W - 24;
+    x2 -= 78;
+    box(ctx, x2, y2, 78, h2, rad2, S.toolsOpen ? 'rgba(216,179,106,0.22)' : C.btn,
+      S.toolsOpen ? C.gold : C.panelLine);
+    txt(ctx, '更多', x2 + 39, y2 + h2 / 2, fs2, S.toolsOpen ? C.gold : C.text);
+    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'tools' });
+
+    x2 -= gap2 + 78;
+    var recOn = !!S.recordOpen;
+    box(ctx, x2, y2, 78, h2, rad2, recOn ? 'rgba(216,179,106,0.22)' : C.btn,
+      recOn ? C.gold : C.panelLine);
+    txt(ctx, recOn ? '记牌●' : '记牌', x2 + 39, y2 + h2 / 2, fs2, recOn ? C.gold : C.text);
+    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'record' });
+
+    x2 -= gap2 + 78;
+    var autoOn = !!S.auto;
+    box(ctx, x2, y2, 78, h2, rad2, autoOn ? 'rgba(59,134,216,0.85)' : C.btn,
+      autoOn ? 'rgba(255,255,255,0.45)' : C.panelLine);
+    txt(ctx, autoOn ? '托管中' : '托管', x2 + 39, y2 + h2 / 2, fs2,
+      autoOn ? '#ffffff' : C.text);
+    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'auto' });
   }
 
   // ---------- 座位 ----------
@@ -1402,10 +1436,29 @@
     var sub = res.camp.mode === 'lone'
       ? '独食者 ' + SEAT_NAMES[res.camp.lone] + ' 拿第 ' + (res.ranks.indexOf(res.camp.lone) + 1) + ' 名'
       : '胜方名次 ' + res.winRanks.join('、');
-    txt(ctx, sub, W / 2, py + 86, 16, C.dim);
+    txt(ctx, sub, W / 2, py + 84, 15, C.dim);
+    // 连胜 / 本局得失提示
+    var myScore = res.scores[0] || 0;
+    var streak = (S.stats && S.stats.streak) || 0;
+    var line = (myScore > 0 ? '本局 +' + myScore + ' 分' : myScore < 0 ? '本局 ' + myScore + ' 分' : '本局 0 分');
+    if (streak >= 2 && myScore > 0) line += ' · 已连胜 ' + streak + ' 局';
+    else if (myScore > 0) line += ' · 开张了';
+    txt(ctx, line, W / 2, py + 110, 15, myScore > 0 ? C.gold : C.dim);
+
+    // 连胜光效：连胜 ≥3 时标题两侧描一圈暖光
+    if (streak >= 3 && myScore > 0) {
+      ctx.save();
+      var pul = 0.45 + 0.25 * Math.sin(Date.now() / 320);
+      ctx.globalAlpha = pul;
+      ctx.strokeStyle = '#ffd27a';
+      ctx.lineWidth = 3;
+      rr(ctx, px - 6, py - 6, pw + 12, ph + 12, 20);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     var cols = [px + 40, px + 200, px + 330, px + 470, px + 590];
-    var hy = py + 128;
+    var hy = py + 142;
     ['名次', '玩家', '阵营', '本局', '累计'].forEach(function (label, i) {
       txt(ctx, label, cols[i], hy, 15, C.dim, i === 0 ? 'left' : 'center');
     });
@@ -1431,10 +1484,19 @@
     });
 
     var isLast = S.round >= S.rounds;
-    var bw = 240, bh = 58;
+    var bw = 200, bh = 58;
     box(ctx, W / 2 - bw / 2, py + ph - 92, bw, bh, 10, C.gold, null);
     txt(ctx, isLast ? '看总成绩' : '下一局', W / 2, py + ph - 63, 21, '#101f33', 'center', 600);
     hits.push({ x: W / 2 - bw / 2, y: py + ph - 92, w: bw, h: bh, act: 'next' });
+
+    // 分享战绩 / 复盘（并排两个次级按钮）
+    box(ctx, px + 40, py + ph - 84, 120, 44, 10, C.btn, C.panelLine);
+    txt(ctx, '分享战绩', px + 100, py + ph - 62, 15, C.text, 'center', 600);
+    hits.push({ x: px + 40, y: py + ph - 84, w: 120, h: 44, act: 'share' });
+
+    box(ctx, px + pw - 160, py + ph - 84, 120, 44, 10, C.btn, C.panelLine);
+    txt(ctx, '复盘', px + pw - 100, py + ph - 62, 15, C.text, 'center', 600);
+    hits.push({ x: px + pw - 160, y: py + ph - 84, w: 120, h: 44, act: 'replay' });
     ctx.restore();
   }
 
@@ -1815,8 +1877,252 @@
   }
 
 
+  // ---------- 记牌器 ----------
+  // 已知牌＝我的手牌＋桌上已出的牌；52 张减去这些即各点数剩余张数
+  function remainByRank(S) {
+    var left = {};
+    for (var r = 2; r <= 14; r++) left[r] = 4;
+    var g = S.game;
+    if (!g) return left;
+    var mine = (g.players && g.players[0] && g.players[0].hand) || [];
+    mine.forEach(function (c) { if (c && left[c.r] !== undefined) left[c.r]--; });
+    (g.trickPlays || []).forEach(function (pl) {
+      (pl.cards || []).forEach(function (c) { if (c && left[c.r] !== undefined) left[c.r]--; });
+    });
+    // 进贡抽走的牌也算已知
+    if (S.tribute && S.tribute.draws) {
+      S.tribute.draws.forEach(function (d) {
+        if (d && d.card && left[d.card.r] !== undefined) left[d.card.r]--;
+      });
+    }
+    for (var k = 2; k <= 14; k++) if (left[k] < 0) left[k] = 0;
+    return left;
+  }
+
+  function recordStrip(ctx, S, L) {
+    if (!S.recordOpen) return;
+    var order = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
+    var left = remainByRank(S);
+    var cw = 46, ch = 42, gap = 2;
+    var totalW = order.length * cw + (order.length - 1) * gap;
+    var x0 = Math.round((W - totalW) / 2);
+    var y = L.hand.y + L.hand.cardH + 6;
+    if (y + ch > L.H - 2) y = L.H - ch - 2;
+    ctx.save();
+    ctx.globalAlpha = 0.96;
+    box(ctx, x0 - 8, y - 4, totalW + 16, ch + 8, 10, 'rgba(10,20,34,0.86)', C.panelLine);
+    order.forEach(function (r, i) {
+      var x = x0 + i * (cw + gap);
+      var n = left[r];
+      var col = n === 0 ? 'rgba(180,190,205,0.35)' : n >= 2 ? C.text : C.gold;
+      txt(ctx, rankText(r), x + cw / 2, y + 14, 15, n === 0 ? 'rgba(180,190,205,0.45)' : C.text, 'center', 600);
+      txt(ctx, '余' + n, x + cw / 2, y + 32, 13, col, 'center');
+    });
+    ctx.restore();
+  }
+
+  // ---------- 工具抽屉 ----------
+  function toolButton(ctx, x, y, w, h, label, sub, on, act, hits, tone) {
+    box(ctx, x, y, w, h, 12, on ? 'rgba(216,179,106,0.2)' : C.btn, on ? C.gold : C.panelLine);
+    txt(ctx, label, x + 16, y + h / 2 - (sub ? 10 : 0), 17, on ? C.gold : C.text, 'left', 600);
+    if (sub) txt(ctx, sub, x + 16, y + h / 2 + 12, 13, C.dim, 'left');
+    if (act) hits.push({ x: x, y: y, w: w, h: h, act: act });
+  }
+
+  function toolsDrawer(ctx, S, L, hits) {
+    if (!S.toolsOpen) return;
+    var pw = 620, ph = 540;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
+    overlay(ctx, L.H, W, pw);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '辅助工具', W / 2, py + 46, 22, C.gold, 'center', 600);
+    var st = S.stats || {};
+    txt(ctx, '战绩 ' + (st.wins || 0) + ' 胜 · 连胜 ' + (st.streak || 0),
+      W / 2, py + 74, 14, C.dim, 'center');
+
+    var cw = (pw - 48 - 16) / 2, ch = 74;
+    var gx = px + 24, gy = py + 96;
+    var items = [
+      { label: '我的战绩', sub: '胜率 / 连胜 / 最近 5 局', act: 'stats', tone: 0 },
+      { label: '复盘回放', sub: '上一局每一手出牌', act: 'replay', tone: 0 },
+      { label: '新手引导', sub: '3 页图解规则', act: 'guide', tone: 0 },
+      { label: '分享战绩', sub: '复制/发送战绩文案', act: 'share', tone: 1 },
+      { label: '背景音乐', sub: (S.musicOn ? '已开启' : '已关闭'), act: 'music', on: !!S.musicOn, tone: 0 },
+      { label: '震动反馈', sub: (S.vibOn ? '已开启' : '已关闭'), act: 'vib', on: !!S.vibOn, tone: 0 },
+      { label: '牌背皮肤', sub: ['经典红', '青竹', '鎏金'][S.skin || 0], act: 'skin', tone: 0 },
+      { label: '记牌器', sub: (S.recordOpen ? '已展开' : '已收起'), act: 'record', on: !!S.recordOpen, tone: 0 }
+    ];
+    items.forEach(function (it, i) {
+      var c = i % 2, r = Math.floor(i / 2);
+      toolButton(ctx, gx + c * (cw + 16), gy + r * (ch + 12), cw, ch,
+        it.label, it.sub, !!it.on, it.act, hits, it.tone);
+    });
+
+    box(ctx, W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', W / 2, py + ph - 39, 16, C.text, 'center', 600);
+    hits.push({ x: W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'toolsClose' });
+  }
+
+  // ---------- 战绩 ----------
+  function statsPanel(ctx, S, L, hits) {
+    if (!S.statsOpen) return;
+    var st = S.stats || {};
+    var pw = 640, ph = 580;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, W, pw);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '我的战绩', W / 2, py + 48, 22, C.gold, 'center', 600);
+
+    var cells = [
+      { k: '场次', v: st.games || 0 },
+      { k: '胜率', v: (st.games ? Math.round((st.wins || 0) / st.games * 100) : 0) + '%' },
+      { k: '当前连胜', v: st.streak || 0 },
+      { k: '最佳连胜', v: st.bestStreak || 0 }
+    ];
+    var cw = (pw - 48 - 36) / 4;
+    cells.forEach(function (c, i) {
+      var x = px + 24 + i * (cw + 12);
+      box(ctx, x, py + 74, cw, 78, 12, 'rgba(20,34,54,0.9)', C.panelLine);
+      txt(ctx, String(c.v), x + cw / 2, py + 108, 24, C.gold, 'center', 700);
+      txt(ctx, c.k, x + cw / 2, py + 134, 13, C.dim, 'center');
+    });
+    txt(ctx, '最佳单局 ' + (st.best || 0) + ' 分 · 共 ' + (st.games || 0) + ' 局（' +
+      (st.wins || 0) + ' 胜 ' + (st.losses || 0) + ' 负 ' + (st.draws || 0) + ' 平）',
+      W / 2, py + 176, 14, C.dim, 'center');
+
+    var cw2 = (pw - 48 - 16) / 2;
+    var lx = px + 24, rx = px + 24 + cw2 + 16;
+    txt(ctx, '最近 5 局', lx, py + 214, 16, C.gold, 'left', 600);
+    txt(ctx, '本机排行榜（单局分）', rx, py + 214, 16, C.gold, 'left', 600);
+
+    var hist = (st.history || []).slice(-5).reverse();
+    if (!hist.length) txt(ctx, '还没有战绩', lx, py + 262, 14, C.dim, 'left');
+    hist.forEach(function (h, i) {
+      var y = py + 232 + i * 44;
+      box(ctx, lx, y, cw2, 38, 10, 'rgba(20,34,54,0.72)', 'rgba(216,179,106,0.16)');
+      var tag = h.win === 1 ? '胜' : h.win === -1 ? '负' : '平';
+      var col = h.win === 1 ? C.gold : h.win === -1 ? '#d99a98' : C.dim;
+      txt(ctx, tag, lx + 16, y + 19, 14, col, 'left', 600);
+      txt(ctx, (h.score > 0 ? '+' : '') + (h.score || 0), lx + 56, y + 19, 15, col, 'left');
+      txt(ctx, h.t ? new Date(h.t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '',
+        lx + cw2 - 14, y + 19, 12, C.dim, 'right');
+    });
+
+    var top = (st.top || []);
+    if (!top.length) txt(ctx, '还没有上榜成绩', rx, py + 262, 14, C.dim, 'left');
+    top.forEach(function (r, i) {
+      var y = py + 232 + i * 44;
+      box(ctx, rx, y, cw2, 38, 10, 'rgba(20,34,54,0.72)', 'rgba(216,179,106,0.16)');
+      txt(ctx, '第 ' + (i + 1), rx + 16, y + 19, 14, i === 0 ? C.gold : C.dim, 'left', 600);
+      txt(ctx, (r.score > 0 ? '+' : '') + (r.score || 0) + ' 分',
+        rx + 72, y + 19, 15, r.score > 0 ? C.gold : C.dim, 'left');
+      txt(ctx, r.t ? new Date(r.t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric' }) : '',
+        rx + cw2 - 14, y + 19, 12, C.dim, 'right');
+    });
+
+    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'statsClose' });
+  }
+
+  // ---------- 复盘 ----------
+  function replayPanel(ctx, S, L, hits) {
+    if (!S.replayOpen) return;
+    var rows = (S.replay || []);
+    var pw = 640, ph = 600;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, W, pw);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '上一局复盘', W / 2, py + 46, 22, C.gold, 'center', 600);
+    txt(ctx, '按出牌顺序记录（过牌也记）', W / 2, py + 72, 13, C.dim, 'center');
+    if (!rows.length) {
+      txt(ctx, '这局还没有出牌记录', W / 2, py + 200, 16, C.dim, 'center');
+    }
+    var show = rows.slice(-11);
+    show.forEach(function (r, i) {
+      var y = py + 96 + i * 42;
+      box(ctx, px + 24, y, pw - 48, 36, 9, 'rgba(20,34,54,0.72)', 'rgba(216,179,106,0.14)');
+      txt(ctx, SEAT_NAMES[r.seat] || ('P' + r.seat), px + 42, y + 18, 14, r.seat === 0 ? C.gold : C.text, 'left', 600);
+      var body = r.pass ? '过牌' : cardLine(r.cards || []);
+      txt(ctx, body, px + 140, y + 18, 14, r.pass ? C.dim : C.text, 'left');
+    });
+    box(ctx, W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', W / 2, py + ph - 39, 16, C.text, 'center', 600);
+    hits.push({ x: W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'replayClose' });
+  }
+
+  function cardLine(cards) {
+    var s = cards.slice(0, 6).map(function (c) { return SUIT[c.s] + rankText(c.r); }).join(' ');
+    return cards.length > 6 ? s + ' …(' + cards.length + ' 张)' : s;
+  }
+
+  // ---------- 新手引导 ----------
+  var GUIDE_PAGES = [
+    {
+      t: '一、认牌与大小',
+      lines: [
+        '整副 52 张、四家各 13 张，没有大小王。',
+        '点数 3 最大、4 最小：3 > 2 > A > K > … > 5 > 4。',
+        '同点数比花色：♠ > ♥ > ♣ > ♦。',
+        '♦4 是起手牌：每局第一手必须带 ♦4。'
+      ]
+    },
+    {
+      t: '二、牌型与出牌',
+      lines: [
+        '单张、对子、三个、顺子（≥5 张连续）、同花顺、葫芦。',
+        '对子/三个比「其中较大那张」的点数与花色。',
+        '顺子按最大张比；同花顺比顺子大。',
+        '压不过就「不出」，四家都过则由上家重新起手。'
+      ]
+    },
+    {
+      t: '三、朋友与独食',
+      lines: [
+        '♠3 与 ♠A 同持 ＝ 独食，1 打 3，两家都赢你就算你输。',
+        '不独食就按身份牌分两队：持 ♠3 与持 ♠A 的两人是朋友。',
+        '名次：先出完 1、2、3、4，按名次计分并决定进贡。',
+        '下一局：输家给赢家进贡（重贡 4/2，轻贡 2/1）。'
+      ]
+    }
+  ];
+
+  function guidePanel(ctx, S, L, hits) {
+    if (!S.guideOpen) return;
+    var page = Math.max(0, Math.min(2, S.guidePage || 0));
+    var G = GUIDE_PAGES[page];
+    var pw = 640, ph = 520;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, W, pw);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.gold);
+    txt(ctx, '新手引导 ' + (page + 1) + '/3', W / 2, py + 44, 15, C.dim, 'center');
+    txt(ctx, G.t, W / 2, py + 82, 24, C.gold, 'center', 700);
+    G.lines.forEach(function (ln, i) {
+      var y = py + 130 + i * 52;
+      box(ctx, px + 34, y - 24, 24, 24, 6, 'rgba(216,179,106,0.18)', C.panelLine);
+      txt(ctx, String(i + 1), px + 46, y - 12, 14, C.gold, 'center', 600);
+      txt(ctx, ln, px + 72, y - 12, 15, C.text, 'left');
+    });
+    var bwb = 150, bhb = 46;
+    if (page > 0) {
+      box(ctx, px + 34, py + ph - 62, bwb, bhb, 12, C.btn, C.panelLine);
+      txt(ctx, '上一页', px + 34 + bwb / 2, py + ph - 39, 15, C.text, 'center');
+      hits.push({ x: px + 34, y: py + ph - 62, w: bwb, h: bhb, act: 'guidePrev' });
+    }
+    box(ctx, px + pw - 34 - bwb, py + ph - 62, bwb, bhb, 12, C.gold, null);
+    txt(ctx, page >= 2 ? '开始游戏' : '下一页', px + pw - 34 - bwb / 2, py + ph - 39, 16, '#101f33', 'center', 600);
+    hits.push({
+      x: px + pw - 34 - bwb, y: py + ph - 62, w: bwb, h: bhb,
+      act: page >= 2 ? 'guideDone' : 'guideNext'
+    });
+    txt(ctx, '跳过', px + pw / 2 + 10, py + ph - 38, 14, C.dim, 'center');
+    hits.push({ x: px + pw / 2 - 30, y: py + ph - 62, w: 80, h: 46, act: 'guideClose' });
+  }
+
+
   function draw(ctx, S, H, wW) {
     if (wW) W = wW;
+    SKIN = S.skin || 0;
     lastH = H;
     var L = layout(H);
     var hits = [];
@@ -1829,6 +2135,7 @@
       menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
+      if (S.guideOpen) guidePanel(ctx, S, L, hits);
       if (S.toast) toast(ctx, S, L);
       ctx.restore();
       return hits;
@@ -1838,18 +2145,31 @@
     center(ctx, S, L, hits);
     if (!S.lobby && !S.waitRoom) {
       hand(ctx, S, L, hits);
+      recordStrip(ctx, S, L);
       actions(ctx, S, L, hits);
       chatEntry(ctx, S, L, hits);
       chatBubbles(ctx, S, L);
     }
     if (S.tribute) tribute(ctx, S, L, hits);
+    // 掉线重连条：常驻在操作带上方，不挡手牌
+    if (S.reconnecting) {
+      var rw = 320, rh = 34, rx = (W - rw) / 2;
+      var ry = (L.actions ? L.actions.y : L.hand.y - 80) - 44;
+      box(ctx, rx, ry, rw, rh, 17, 'rgba(140,47,42,0.92)', 'rgba(255,210,180,0.6)');
+      txt(ctx, '连接断开，正在重连 ' + (S.reconnectTries || 1) + '/8 …',
+        W / 2, ry + rh / 2, 14, '#ffe9dd', 'center', 600);
+    }
     if (S.phase === 'settle') settle(ctx, S, L, hits);
     fxOverlay(ctx, S, L, H);
     if (S.summary) summary(ctx, S, L, hits);
     if (S.lobby) lobbyPanel(ctx, S, L, hits);
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
     if (S.chatOpen) chatPanel(ctx, S, L, hits);
+    if (S.toolsOpen) toolsDrawer(ctx, S, L, hits);
+    if (S.statsOpen) statsPanel(ctx, S, L, hits);
+    if (S.replayOpen) replayPanel(ctx, S, L, hits);
     if (S.testMenu) testPanel(ctx, S, L, hits);
+    if (S.guideOpen) guidePanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
     ctx.restore();
     return hits;
