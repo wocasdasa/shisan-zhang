@@ -1658,10 +1658,6 @@
       txt(ctx, '联机对战', W / 2, py + 56, 28, C.gold, 'center', 600);
       txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', W / 2, py + 88, 14, C.dim);
       txt(ctx, '服务器 ' + (S.lobby.url || ''), W / 2, py + 112, 13, C.dim);
-      if (/ws:\/\/127\.0\.0\.1|ws:\/\/localhost/.test(S.lobby.url || '')) {
-        txt(ctx, '真机需 wss 域名：wx.setStorageSync("gx13_server", "wss://…")',
-          W / 2, py + 134, 12, '#e8b0ae');
-      }
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);

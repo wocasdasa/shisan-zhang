@@ -732,7 +732,12 @@
 
   // 回主界面：联机顺带退房；单机直接回标题
   function doExitHome() {
-    if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
+    if (S.mode === 'online') {
+      backToSolo();
+      openLobby();            // 联机局内「主界面」→ 联机对战大厅（创建/加入房间），即截图那个界面
+      toast('已离开房间');
+      return;
+    }
     clearTurnTimer();
     clearTributeTimer();
     SFX.flush();
