@@ -154,7 +154,7 @@ node server/index.js            # 默认 8787，PORT 环境变量可改
 | `node tools/voice-export.js` | 重新生成 `minigame/audio/voice/*.wav`（需豆包 TTS 接口，见第 7 节） |
 | `node tools/cdp-shot.js` / `cdp-hit.js` | 用 Chrome DevTools Protocol 截图 / 命中测试（覆盖预览页的假命中问题） |
 
-一次性排查脚本（`tools/patch-*.js`、`cdp-*.js` 等）是迭代过程中留下的修复/取证脚本，可直接删除，不影响运行。
+迭代过程中留下的一次性 `patch-*.js` / `cdp-*.js` 取证脚本已在 1.0.6 前的清理中删除（需要回溯可从 git 历史取）；`tools/` 里只保留上面这张表里在用的脚本。
 
 ---
 
