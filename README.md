@@ -65,14 +65,19 @@ guangxi_13/
 │   ├── README.md           小游戏侧操作说明
 │   └── js/
 │       ├── app.js          状态机、触屏、计时、进贡交互、联机视图映射、昵称/发言
-│       ├── views.js        纯 Canvas 绘制 + 点击热区（draw 返回 hits 数组）
+│       ├── views.js        绘制编排：draw() 产出 hits，按 phase 叠各层
+│       ├── views/base.js   常量和 state（W/lastH/SKIN）+ 绘制原语 + 全部特效
+│       ├── views/table.js  页头、座位、中央出牌区、手牌、操作条
+│       ├── views/panels.js 进贡、结算、菜单、大厅、房间、聊天、工具抽屉、战绩、复盘、引导
+│       ├── config.js       构建期默认服务器地址（上线填 wss://）
 │       ├── audio.js        音效合成 + 语音播报队列
-│       ├── net.js          传输层（wx.connectSocket / 浏览器 WebSocket）
+│       ├── net.js          传输层（wx.connectSocket / 浏览器 WebSocket）+ 心跳 + 重连
 │       ├── platform.js     平台适配（设计宽 750、脏标记重绘、文字输入）
 │       └── engine/         规则引擎副本（由 tools/sync-engine.js 同步）
 ├── server/
-│   ├── index.js            房间与对局权威端（ws://0.0.0.0:8787）
-│   └── ws.js               极简 WebSocket 实现（无第三方依赖）
+│   ├── index.js            房间与对局权威端（默认 ws://0.0.0.0:8787，配证书即 wss://）
+│   └── ws.js               极简 WebSocket 实现（无第三方依赖，可选 TLS）
+├── deploy/                 上线手册：systemd 单元、nginx 样例、环境变量
 ├── tools/                  开发脚本（见第 4 节）
 ├── test/                   自战与一致性校验
 ├── docs/                   规则书、设计文档、验证报告
@@ -130,12 +135,25 @@ node -e "const h=require('http'),f=require('fs'),p=require('path');h.createServe
 ### 3.3 联机服务端
 
 ```powershell
-node server/index.js            # 默认 8787，PORT 环境变量可改
+node server/index.js            # 默认 8787，PORT/HOST 环境变量可改
 ```
 
-- 客户端默认连 `ws://<当前host>:8787`，可 `?server=ws://192.168.1.5:8787` 覆盖
+- 客户端默认连 `ws://<当前host>:8787`，可 `?server=ws://192.168.1.5:8787` 覆盖；真机在游戏内点「服务器」一行改地址
 - 房间：房主「创建房间」拿 4 位房号，其他人输房号加入；不足 4 人由房主点「开始（空位补机器人）」
-- 快速验证联机：`node tools/hostbot.js` / `node tools/netbot.js`（模拟客户端），或 `node tools/wsclient.js`
+- 快速验证联机：`node tools/wss-smoke.js ws://127.0.0.1:8787`（握手→建房→发言），或 `hostbot.js` / `netbot.js` 模拟客户端
+
+**直接跑 wss**（不装 nginx，适合内网/联调）：
+
+```powershell
+# PEM：TLS_KEY / TLS_CERT；PFX：TLS_PFX / TLS_PASS
+$env:TLS_KEY='privkey.pem'; $env:TLS_CERT='fullchain.pem'; $env:PORT='443'
+node server/index.js
+node tools/wss-smoke.js wss://127.0.0.1 --insecure   # 自签证书才需要 --insecure
+```
+
+- 健康检查：`GET /health` → `{"ok":true,"uptime":…,"secure":…,"rooms":…,"conns":…,"players":…}`
+- 防护上限：`MAX_CONNS`/`MAX_ROOMS`/`RATE_MSGS`/`IDLE_CLOSE_MS`/`ROOM_IDLE_MS`，默认 400/200/60 条每 10 秒/90 秒/10 分钟
+- **真机上线（备案域名 + 证书 + 微信后台 socket 域名 + 443）步骤见 [`deploy/README.md`](deploy/README.md)**
 
 ---
 
@@ -145,6 +163,9 @@ node server/index.js            # 默认 8787，PORT 环境变量可改
 |---|---|
 | `node tools/sync-engine.js` | **改完 `engine/` 必跑**：同步到 `minigame/js/engine/` |
 | `node tools/build-mini-preview.js` | **改完 `minigame/js/` 必跑**：重建 `minigame/preview.html` |
+| `node tools/shot-matrix.js .tools/vis-a` | **改完 `views/` 必跑**：采集 24 个 demo 模式的画布像素哈希 + 热区，冻结时间/随机数保证可复现 |
+| `node tools/shot-matrix.js --compare .tools/vis-a .tools/vis-b` | 两套截图矩阵逐模式比对（`WIN=1334,750` 跑横屏，游戏真实朝向） |
+| `node tools/wss-smoke.js ws://127.0.0.1:8787` | 联机冒烟：握手 → 建房 → 发言往返；`wss://` 与 `--insecure` 支持自签 |
 | `node test/selftest.js` | 引擎自检（牌型、比较、计分） |
 | `node test/selfplay.js` | 全 AI 自战若干局，检查规则不崩 |
 | `node tools/smoke-solo-tribute.js` | 单机进贡全流程冒烟 |
@@ -241,12 +262,15 @@ node server/index.js            # 默认 8787，PORT 环境变量可改
 
 1. **改 `engine/` → 跑 `node tools/sync-engine.js`**；改 `minigame/js/` → 跑 `node tools/build-mini-preview.js`。两条都忘了就会出现「预览是对的、真机是旧的」。
 2. `minigame/preview.html` 是**构建产物**，不要手改，改了下次构建会被覆盖。
-3. 布局集中在 `views.js` 的 `layout()`（设计宽 750，横竖屏两套座位/手牌/操作条坐标），点击热区由 `draw()` 返回的 `hits` 驱动；新增按钮必须 `hits.push({x,y,w,h,act})` 并在 `app.js` 的 `handleAct` 里接分支。
-4. 界面改动建议先截图核对再提交：headless Chrome `--window-size=750,1268`（竖屏）/ `1334,750`（横屏）截 `preview.html`，需要造局面就用 `tools/cdp-*.js` 注数据。
-5. 语音/音效：`audio.js` 合成音不依赖文件；语音必须走队列，**不要**在播放中间 `stop()`，否则会截断上一手。
-6. 头像/昵称：昵称存在本地 `gx13_myname`，进房时随 `create/join` 上报，房内改名走 `rename`。
-7. 截图、日志、试听 wav、二维码等产出**不要提交**（见 `.gitignore`），放本地 `tools/` 或临时目录即可。
-8. 微信侧打开文档/链接一律走飞书/Lark 工具，不要用浏览器打开 `larkoffice` 链接（工具约定）。
+3. **绘制分层**：`views.js` 只做编排（`draw()` 按 phase 叠层并产出 `hits`）；原语与特效在 `views/base.js`，牌桌在 `views/table.js`，弹层在 `views/panels.js`。层间依赖是单向的（base ← table ← panels ← draw），新增绘制函数要放进合适那层，别往下层反向调。
+4. **跨函数可变状态只有 `state` 一个**：`state.W`（横屏宽）、`state.lastH`（画布高，供 banner 定位）、`state.SKIN`（牌背皮肤）。新增共享状态加进 `base.js` 的 `state`，不要再定义模块级可变变量——拆模块后会变成各自副本。
+5. 布局集中在 `views/base.js` 的 `layout()`（设计宽 750，横竖屏两套座位/手牌/操作条坐标），点击热区由 `draw()` 返回的 `hits` 驱动；新增按钮必须 `hits.push({x,y,w,h,act})` 并在 `app.js` 的 `handleAct` 里接分支。
+6. **改完 `views/` 必须做像素回归**：`node tools/shot-matrix.js .tools/vis-a` 采基线 → 改 → 再采 → `--compare`。它冻结 `Date.now`/`Math.random`，比的是画布像素哈希 + 完整 `hits` 数组；横屏要加 `$env:WIN='1334,750'`（游戏是横屏）。
+7. 语音/音效：`audio.js` 合成音不依赖文件；语音必须走队列，**不要**在播放中间 `stop()`，否则会截断上一手。
+8. 头像/昵称：昵称存在本地 `gx13_myname`，进房时随 `create/join` 上报，房内改名走 `rename`。
+9. 联机地址：构建期看 `minigame/js/config.js` 的 `SERVER_URL`，运行期看存储 `gx13_server`（游戏内大厅可改），**存储优先**。
+10. 截图、日志、试听 wav、二维码等产出**不要提交**（见 `.gitignore`），放本地 `tools/` 或临时目录即可。
+11. 微信侧打开文档/链接一律走飞书/Lark 工具，不要用浏览器打开 `larkoffice` 链接（工具约定）。
 
 ---
 
@@ -272,9 +296,10 @@ node tools/pack-dist.js
 ## 10. 已知限制 / 待办
 
 - 联机只在**自建 WebSocket** 上可用；微信云开发链路（`net.js` 的 `hasCloud` 分支）没有实现房间逻辑，**默认关闭**（要真用得先 `wx.setStorageSync('gx13_cloud','1')` 并把云函数补齐），别误开
-- 真机联机需要 `wss://` 合法域名（`wx.setStorageSync('gx13_server','wss://…')`）；默认地址是 `ws://127.0.0.1:8787`，大厅会用红字提示真机不可用
-- 真机必须 `wss://` 且域名已在小游戏后台配置（socket 合法域名）
+- **代码侧 wss 已就绪**（服务端可选 TLS、客户端 25s 心跳、游戏内可改地址、部署手册齐备），但还没有备案域名与证书：默认地址仍是 `ws://127.0.0.1:8787`，大厅会用红字提示真机不可用。上线只差 [`deploy/README.md`](deploy/README.md) 里那几步
+- 真机必须 `wss://` 且域名已在小游戏后台配置（socket 合法域名，不能带端口）
 - AI 三档难度只影响候选筛选激进程度，不是搜索型 AI
 - 断线重连只覆盖自建 WebSocket；云开发分支没实现房间逻辑，也就没有 rejoin
 - 战绩 / 排行 / 复盘都只存在本机（`gx13_stats`、`gx13_skin` 等），换设备不迁移；暂不上云、无全服榜
 - 待做：观战、分享图卡（现在是分享文案 + 标题，没有生成战绩海报）
+- 待做：`app.js`（80KB）仍是单文件状态机，本轮只拆了 `views.js`；下一轮可按 `state / actions / online` 再拆
