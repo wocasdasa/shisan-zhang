@@ -771,13 +771,10 @@
     txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
 
-    // 左上角：主界面（二次确认）+ 菜单
+    // 左上角：主界面（点了弹确认）+ 菜单
     var mx = 20, my = y2;
-    var ep = (S.exitPending || 0) > Date.now();
-    box(ctx, mx, my, 84, h2, rad2, ep ? 'rgba(216,179,106,0.22)' : C.btn,
-      ep ? C.gold : C.panelLine);
-    txt(ctx, ep ? '确认退出' : '主界面', mx + 42, my + h2 / 2, ep ? 13 : fs2,
-      ep ? C.gold : C.text, 'center', 600);
+    box(ctx, mx, my, 84, h2, rad2, C.btn, C.panelLine);
+    txt(ctx, '主界面', mx + 42, my + h2 / 2, fs2, C.text, 'center', 600);
     hits.push({ x: mx, y: my, w: 84, h: h2, act: 'exitHome' });
 
     var mx2 = mx + 84 + 8;
@@ -1819,9 +1816,19 @@
       hits.push({ x: W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netReady' });
     }
 
-    box(ctx, W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
-    txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
-    hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
+    if (S.isHost) {
+      var lw = 220, lg = 14;
+      box(ctx, W / 2 - lw - lg / 2, y2 + 78, lw, 52, 10, 'rgba(140,47,42,0.9)', 'rgba(255,210,180,0.5)');
+      txt(ctx, '解散房间', W / 2 - lg / 2 - lw / 2, y2 + 78 + 27, 16, '#ffe9dd', 'center', 600);
+      hits.push({ x: W / 2 - lw - lg / 2, y: y2 + 78, w: lw, h: 52, act: 'dissolveWait' });
+      box(ctx, W / 2 + lg / 2, y2 + 78, lw, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', W / 2 + lg / 2 + lw / 2, y2 + 78 + 27, 16, C.text, 'center');
+      hits.push({ x: W / 2 + lg / 2, y: y2 + 78, w: lw, h: 52, act: 'netLeave' });
+    } else {
+      box(ctx, W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
+      hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
+    }
   }
 
   // ---------- 联机：发言面板 / 气泡 ----------
@@ -2151,7 +2158,7 @@
   // ---------- 对局内菜单 ----------
   function pausePanel(ctx, S, L, hits) {
     if (!S.pauseOpen) return;
-    var pw = 640, ph = L.landscape ? 540 : 560;
+    var pw = 640, ph = L.landscape ? 600 : 640;
     var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
     overlay(ctx, L.H, W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
@@ -2164,7 +2171,7 @@
     var cw = (pw - 48 - 16) / 2, ch = 62;
     var gx = px + 24, gy = py + 92;
     var items = [
-      { label: '返回主界面', sub: S.mode === 'online' ? '离开房间回标题' : '结束本场回标题', act: 'exitToMenu' },
+      { label: '返回主界面', sub: S.mode === 'online' ? '问一次再走 · 座位转托管' : '问一次再走 · 回标题', act: 'exitToMenu' },
       { label: S.auto ? '取消托管' : '托管', sub: S.auto ? '正在自动出牌' : '轮到你自动出最小牌', act: 'auto', on: !!S.auto },
       { label: '记牌器', sub: S.recordOpen ? '已展开' : '已收起', act: 'record', on: !!S.recordOpen },
       { label: '新手引导', sub: '3 页图解规则', act: 'guide' },
@@ -2175,6 +2182,10 @@
       { label: '震动反馈', sub: S.vibOn ? '已开启' : '已关闭', act: 'vib', on: !!S.vibOn },
       { label: '牌背皮肤', sub: ['经典红', '青竹', '鎏金'][S.skin || 0], act: 'skin' }
     ];
+    // 房主在联机局内多一个「解散房间」——只有点它才真的散桌
+    if (S.mode === 'online' && S.isHost) {
+      items.push({ label: '解散房间', sub: '房主专属 · 四人一起散', act: 'dissolve' });
+    }
     items.forEach(function (it, i) {
       var c = i % 2, r = Math.floor(i / 2);
       toolButton(ctx, gx + c * (cw + 16), gy + r * (ch + 12), cw, ch,
@@ -2184,6 +2195,36 @@
     box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
     txt(ctx, '继续游戏', W / 2, py + ph - 37, 16, C.text, 'center', 600);
     hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'pauseClose' });
+  }
+
+  // 二次确认弹窗：退出本局 / 解散房间
+  function askPanel(ctx, S, L, hits) {
+    if (!S.ask) return;
+    var H = L.H, pw = 560, ph = 320;
+    var px = (W - pw) / 2, py = Math.max(12, (H - ph) / 2);
+    overlay(ctx, H, W, H);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    var ex = S.ask.kind === 'dissolve';
+    txt(ctx, ex ? '解散房间？' : '退出本局？', W / 2, py + 56, 24, C.gold, 'center', 600);
+    var sub = ex
+      ? '房间会关闭，四位玩家都回联机大厅'
+      : (S.mode === 'online'
+        ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
+        : '本局进度不保存，回到主界面');
+    txt(ctx, sub, W / 2, py + 100, 14, C.dim, 'center');
+    if (S.mode === 'online' && !ex) {
+      txt(ctx, '有人在线时房间会继续', W / 2, py + 128, 13, C.dim, 'center');
+    }
+
+    var bw = 220, bh = 60, by = py + ph - 96;
+    box(ctx, W / 2 - bw - 10, by, bw, bh, 12, ex ? 'rgba(140,47,42,0.92)' : C.gold, null);
+    txt(ctx, ex ? '解散' : '退出', W / 2 - bw / 2 - 10, by + bh / 2, 18,
+      ex ? '#ffe9dd' : '#101f33', 'center', 600);
+    hits.push({ x: W / 2 - bw - 10, y: by, w: bw, h: bh, act: 'askYes' });
+
+    box(ctx, W / 2 + 10, by, bw, bh, 12, C.btn, C.panelLine);
+    txt(ctx, '取消', W / 2 + bw / 2 + 10, by + bh / 2, 18, C.text, 'center');
+    hits.push({ x: W / 2 + 10, y: by, w: bw, h: bh, act: 'askNo' });
   }
 
 
@@ -2203,6 +2244,7 @@
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
       if (S.guideOpen) guidePanel(ctx, S, L, hits);
+      if (S.ask) askPanel(ctx, S, L, hits);
       if (S.toast) toast(ctx, S, L);
       ctx.restore();
       return hits;
@@ -2238,6 +2280,7 @@
     if (S.replayOpen) replayPanel(ctx, S, L, hits);
     if (S.testMenu) testPanel(ctx, S, L, hits);
     if (S.guideOpen) guidePanel(ctx, S, L, hits);
+    if (S.ask) askPanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
     ctx.restore();
     return hits;

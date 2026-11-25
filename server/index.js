@@ -197,6 +197,17 @@ function rejoinRoom(conn, msg) {
 // 掉线：对局中先保留座位 90 秒（期间轮到他由超时逻辑代打），超时转 AI
 const DROP_GRACE_MS = 90000;
 
+// 房主走了但还有人在线：把房主交给下一位真人；没有真人则清空 hostSeat
+function ensureHost(room) {
+  const cur = room.seats[room.hostSeat];
+  if (cur && !cur.ai && cur.connId) return;
+  for (let i = 1; i <= 4; i++) {
+    const s = room.seats[(room.hostSeat + i) % 4];
+    if (s && !s.ai && s.connId) { room.hostSeat = (room.hostSeat + i) % 4; return; }
+  }
+  room.hostSeat = -1;
+}
+
 function leaveRoom(conn, explicit) {
   const info = conns.get(conn.id);
   if (!info) return;
@@ -212,11 +223,17 @@ function leaveRoom(conn, explicit) {
       broadcast(room);
       return;
     }
-    // 对局中主动离开：座位交给机器人托管，避免四人局缺口
+    // 对局中主动离开：座位交给机器人托管，只要还有人在线，房间不解散
     seat.connId = null;
     seat.droppedAt = 0;
     seat.ai = true;
     setEvent(room, seat.name + ' 离开，由机器人托管');
+    if (humanCount(room) === 0) {
+      clearTimer(room);
+      rooms.delete(room.id);
+      return;
+    }
+    ensureHost(room);
     broadcast(room);
     if (room.phase === 'play' && room.game && !room.game.over && room.game.turn === info.seat) {
       scheduleTurn(room);
@@ -225,10 +242,31 @@ function leaveRoom(conn, explicit) {
   }
   room.seats[info.seat] = null;
   setEvent(room, '有人离开房间');
-  if (room.phase === 'wait') {
-    if (humanCount(room) === 0) rooms.delete(room.id);
+  if (humanCount(room) === 0) {
+    clearTimer(room);
+    rooms.delete(room.id);
+    return;
   }
+  ensureHost(room);
   broadcast(room);
+}
+
+// 房主主动解散：通知所有人并销毁房间（只有这一种情况会解散）
+function dissolveRoom(conn) {
+  const info = conns.get(conn.id);
+  if (!info) return false;
+  const room = rooms.get(info.roomId);
+  if (!room) return false;
+  if (room.hostSeat !== info.seat) { send(conn, { t: 'err', msg: '只有房主能解散房间' }); return false; }
+  clearTimer(room);
+  rooms.delete(room.id);
+  room.seats.forEach((s) => {
+    if (!s || !s.connId) return;
+    const c = conns.get(s.connId);
+    if (c && c.conn) send(c.conn, { t: 'roomClosed', msg: '房主解散了房间' });
+    conns.delete(s.connId);
+  });
+  return true;
 }
 
 // 宽限期到：掉线座位交给 AI 托管，后续轮次不再等 20 秒
@@ -655,6 +693,8 @@ function handle(conn, msg) {
   const seat = info.seat;
 
   if (msg.t === 'leave') { leaveRoom(conn, true); return; }
+
+  if (msg.t === 'dissolve') { dissolveRoom(conn); return; }
 
   if (DBG) console.log('[R' + room.round + '] 收到 ' + msg.t + ' seat=' + seat +
     (msg.cards ? ' 牌数=' + msg.cards.length : ''));

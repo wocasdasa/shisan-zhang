@@ -71,7 +71,8 @@
     streakNow: 0,
     lastSettleKey: '',
     guideDone: false,
-    musicOn: false
+    musicOn: false,
+    ask: null             // 二次确认弹窗：null / {kind:'exit'} / {kind:'dissolve'}
   };
 
   var toastTimer = null;
@@ -818,6 +819,14 @@
       P.markDirty();
       return;
     }
+    if (m.t === 'roomClosed') {
+      // 房主解散了房间：所有人回联机大厅
+      backToSolo();
+      openLobby();
+      toast(m.msg || '房间已解散');
+      S.lobby.err = m.msg || '';
+      return;
+    }
     if (m.t === 'state') { applyView(m); return; }  }
 
   function startNetTimer(deadline) {
@@ -1521,6 +1530,7 @@
 
   // 弹层打开时吞掉下层点击（引导/战绩/复盘/抽屉/发言都是模态）
   function modalBlocked(act) {
+    if (S.ask) return !(act === 'askYes' || act === 'askNo');
     if (S.guideOpen) return !/^guide/.test(act);
     if (S.statsOpen) return act !== 'statsClose';
     if (S.replayOpen) return act !== 'replayClose';
@@ -1529,8 +1539,8 @@
         act === 'share' || act === 'music' || act === 'vib' || act === 'skin' || act === 'record');
     }
     if (S.pauseOpen) {
-      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'auto' || act === 'record' ||
-        act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
+      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'dissolve' || act === 'auto' ||
+        act === 'record' || act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
         act === 'music' || act === 'vib' || act === 'skin');
     }
     if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText' || act === 'chatType');
@@ -1629,6 +1639,7 @@
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
     if (h.act === 'netLeave') { backToSolo(); return; }
+    if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
     if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
     if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
@@ -1646,20 +1657,43 @@
     }
     if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
     if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
-    if (h.act === 'exitToMenu') { S.pauseOpen = false; doExitHome(); return; }
+    if (h.act === 'exitToMenu') { S.pauseOpen = false; S.ask = { kind: 'exit' }; P.markDirty(); return; }
     if (h.act === 'exitHome') {
-      // 主界面按钮在局内：一次点击只提醒，3 秒内再点才真退出，防误触
-      if (Date.now() > (S.exitPending || 0)) {
-        S.exitPending = Date.now() + 3000;
-        toast('再点一次「主界面」确认离开本局');
-        P.markDirty();
-        setTimeout(function () {
-          if (S.exitPending && Date.now() >= S.exitPending) { S.exitPending = 0; P.markDirty(); }
-        }, 3100);
+      // 点「主界面」先问一句，不直接退
+      S.pauseOpen = false;
+      S.ask = { kind: 'exit' };
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'dissolve') {
+      S.pauseOpen = false;
+      S.ask = { kind: 'dissolve' };
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'askNo') { S.ask = null; P.markDirty(); return; }
+    if (h.act === 'askYes') {
+      var kind = S.ask ? S.ask.kind : 'exit';
+      S.ask = null;
+      if (kind === 'dissolve') {
+        if (S.mode === 'online') {
+          NET.send({ t: 'dissolve' });
+          // 等一帧让消息先发出去，再关连接
+          setTimeout(function () { backToSolo(); openLobby(); }, 250);
+        } else {
+          backToSolo();
+          openLobby();
+        }
+        toast('房间已解散');
         return;
       }
-      S.exitPending = 0;
-      S.pauseOpen = false;
+      if (S.mode === 'online') {
+        // 先告诉服务端「主动离开→座位转托管」，再回大厅
+        NET.send({ t: 'leave' });
+        setTimeout(function () { doExitHome(); }, 250);
+        toast('已退出，座位由机器人托管');
+        return;
+      }
       doExitHome();
       return;
     }
@@ -1816,6 +1850,8 @@
       var qs = (window.location && window.location.search) || '';
       if (/tools=1/.test(qs)) S.toolsOpen = true;
       if (/pause=1/.test(qs)) S.pauseOpen = true;
+      if (/askExit=1/.test(qs)) S.ask = { kind: 'exit' };
+      if (/askDissolve=1/.test(qs)) S.ask = { kind: 'dissolve' };
       if (/stats=1/.test(qs)) { S.statsOpen = true; S.stats = loadStats(); }
       if (/record=1/.test(qs)) S.recordOpen = true;
       if (/guide=1/.test(qs)) { S.guideOpen = true; S.guidePage = 0; }

@@ -2881,13 +2881,10 @@ define("js/views.js", function (require, module, exports) {
     txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
 
-    // 左上角：主界面（二次确认）+ 菜单
+    // 左上角：主界面（点了弹确认）+ 菜单
     var mx = 20, my = y2;
-    var ep = (S.exitPending || 0) > Date.now();
-    box(ctx, mx, my, 84, h2, rad2, ep ? 'rgba(216,179,106,0.22)' : C.btn,
-      ep ? C.gold : C.panelLine);
-    txt(ctx, ep ? '确认退出' : '主界面', mx + 42, my + h2 / 2, ep ? 13 : fs2,
-      ep ? C.gold : C.text, 'center', 600);
+    box(ctx, mx, my, 84, h2, rad2, C.btn, C.panelLine);
+    txt(ctx, '主界面', mx + 42, my + h2 / 2, fs2, C.text, 'center', 600);
     hits.push({ x: mx, y: my, w: 84, h: h2, act: 'exitHome' });
 
     var mx2 = mx + 84 + 8;
@@ -3929,9 +3926,19 @@ define("js/views.js", function (require, module, exports) {
       hits.push({ x: W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netReady' });
     }
 
-    box(ctx, W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
-    txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
-    hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
+    if (S.isHost) {
+      var lw = 220, lg = 14;
+      box(ctx, W / 2 - lw - lg / 2, y2 + 78, lw, 52, 10, 'rgba(140,47,42,0.9)', 'rgba(255,210,180,0.5)');
+      txt(ctx, '解散房间', W / 2 - lg / 2 - lw / 2, y2 + 78 + 27, 16, '#ffe9dd', 'center', 600);
+      hits.push({ x: W / 2 - lw - lg / 2, y: y2 + 78, w: lw, h: 52, act: 'dissolveWait' });
+      box(ctx, W / 2 + lg / 2, y2 + 78, lw, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', W / 2 + lg / 2 + lw / 2, y2 + 78 + 27, 16, C.text, 'center');
+      hits.push({ x: W / 2 + lg / 2, y: y2 + 78, w: lw, h: 52, act: 'netLeave' });
+    } else {
+      box(ctx, W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
+      hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
+    }
   }
 
   // ---------- 联机：发言面板 / 气泡 ----------
@@ -4261,7 +4268,7 @@ define("js/views.js", function (require, module, exports) {
   // ---------- 对局内菜单 ----------
   function pausePanel(ctx, S, L, hits) {
     if (!S.pauseOpen) return;
-    var pw = 640, ph = L.landscape ? 540 : 560;
+    var pw = 640, ph = L.landscape ? 600 : 640;
     var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
     overlay(ctx, L.H, W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
@@ -4274,7 +4281,7 @@ define("js/views.js", function (require, module, exports) {
     var cw = (pw - 48 - 16) / 2, ch = 62;
     var gx = px + 24, gy = py + 92;
     var items = [
-      { label: '返回主界面', sub: S.mode === 'online' ? '离开房间回标题' : '结束本场回标题', act: 'exitToMenu' },
+      { label: '返回主界面', sub: S.mode === 'online' ? '问一次再走 · 座位转托管' : '问一次再走 · 回标题', act: 'exitToMenu' },
       { label: S.auto ? '取消托管' : '托管', sub: S.auto ? '正在自动出牌' : '轮到你自动出最小牌', act: 'auto', on: !!S.auto },
       { label: '记牌器', sub: S.recordOpen ? '已展开' : '已收起', act: 'record', on: !!S.recordOpen },
       { label: '新手引导', sub: '3 页图解规则', act: 'guide' },
@@ -4285,6 +4292,10 @@ define("js/views.js", function (require, module, exports) {
       { label: '震动反馈', sub: S.vibOn ? '已开启' : '已关闭', act: 'vib', on: !!S.vibOn },
       { label: '牌背皮肤', sub: ['经典红', '青竹', '鎏金'][S.skin || 0], act: 'skin' }
     ];
+    // 房主在联机局内多一个「解散房间」——只有点它才真的散桌
+    if (S.mode === 'online' && S.isHost) {
+      items.push({ label: '解散房间', sub: '房主专属 · 四人一起散', act: 'dissolve' });
+    }
     items.forEach(function (it, i) {
       var c = i % 2, r = Math.floor(i / 2);
       toolButton(ctx, gx + c * (cw + 16), gy + r * (ch + 12), cw, ch,
@@ -4294,6 +4305,36 @@ define("js/views.js", function (require, module, exports) {
     box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
     txt(ctx, '继续游戏', W / 2, py + ph - 37, 16, C.text, 'center', 600);
     hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'pauseClose' });
+  }
+
+  // 二次确认弹窗：退出本局 / 解散房间
+  function askPanel(ctx, S, L, hits) {
+    if (!S.ask) return;
+    var H = L.H, pw = 560, ph = 320;
+    var px = (W - pw) / 2, py = Math.max(12, (H - ph) / 2);
+    overlay(ctx, H, W, H);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    var ex = S.ask.kind === 'dissolve';
+    txt(ctx, ex ? '解散房间？' : '退出本局？', W / 2, py + 56, 24, C.gold, 'center', 600);
+    var sub = ex
+      ? '房间会关闭，四位玩家都回联机大厅'
+      : (S.mode === 'online'
+        ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
+        : '本局进度不保存，回到主界面');
+    txt(ctx, sub, W / 2, py + 100, 14, C.dim, 'center');
+    if (S.mode === 'online' && !ex) {
+      txt(ctx, '有人在线时房间会继续', W / 2, py + 128, 13, C.dim, 'center');
+    }
+
+    var bw = 220, bh = 60, by = py + ph - 96;
+    box(ctx, W / 2 - bw - 10, by, bw, bh, 12, ex ? 'rgba(140,47,42,0.92)' : C.gold, null);
+    txt(ctx, ex ? '解散' : '退出', W / 2 - bw / 2 - 10, by + bh / 2, 18,
+      ex ? '#ffe9dd' : '#101f33', 'center', 600);
+    hits.push({ x: W / 2 - bw - 10, y: by, w: bw, h: bh, act: 'askYes' });
+
+    box(ctx, W / 2 + 10, by, bw, bh, 12, C.btn, C.panelLine);
+    txt(ctx, '取消', W / 2 + bw / 2 + 10, by + bh / 2, 18, C.text, 'center');
+    hits.push({ x: W / 2 + 10, y: by, w: bw, h: bh, act: 'askNo' });
   }
 
 
@@ -4313,6 +4354,7 @@ define("js/views.js", function (require, module, exports) {
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
       if (S.guideOpen) guidePanel(ctx, S, L, hits);
+      if (S.ask) askPanel(ctx, S, L, hits);
       if (S.toast) toast(ctx, S, L);
       ctx.restore();
       return hits;
@@ -4348,6 +4390,7 @@ define("js/views.js", function (require, module, exports) {
     if (S.replayOpen) replayPanel(ctx, S, L, hits);
     if (S.testMenu) testPanel(ctx, S, L, hits);
     if (S.guideOpen) guidePanel(ctx, S, L, hits);
+    if (S.ask) askPanel(ctx, S, L, hits);
     if (S.toast) toast(ctx, S, L);
     ctx.restore();
     return hits;
@@ -4434,7 +4477,8 @@ define("js/app.js", function (require, module, exports) {
     streakNow: 0,
     lastSettleKey: '',
     guideDone: false,
-    musicOn: false
+    musicOn: false,
+    ask: null             // 二次确认弹窗：null / {kind:'exit'} / {kind:'dissolve'}
   };
 
   var toastTimer = null;
@@ -5181,6 +5225,14 @@ define("js/app.js", function (require, module, exports) {
       P.markDirty();
       return;
     }
+    if (m.t === 'roomClosed') {
+      // 房主解散了房间：所有人回联机大厅
+      backToSolo();
+      openLobby();
+      toast(m.msg || '房间已解散');
+      S.lobby.err = m.msg || '';
+      return;
+    }
     if (m.t === 'state') { applyView(m); return; }  }
 
   function startNetTimer(deadline) {
@@ -5884,6 +5936,7 @@ define("js/app.js", function (require, module, exports) {
 
   // 弹层打开时吞掉下层点击（引导/战绩/复盘/抽屉/发言都是模态）
   function modalBlocked(act) {
+    if (S.ask) return !(act === 'askYes' || act === 'askNo');
     if (S.guideOpen) return !/^guide/.test(act);
     if (S.statsOpen) return act !== 'statsClose';
     if (S.replayOpen) return act !== 'replayClose';
@@ -5892,8 +5945,8 @@ define("js/app.js", function (require, module, exports) {
         act === 'share' || act === 'music' || act === 'vib' || act === 'skin' || act === 'record');
     }
     if (S.pauseOpen) {
-      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'auto' || act === 'record' ||
-        act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
+      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'dissolve' || act === 'auto' ||
+        act === 'record' || act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
         act === 'music' || act === 'vib' || act === 'skin');
     }
     if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText' || act === 'chatType');
@@ -5992,6 +6045,7 @@ define("js/app.js", function (require, module, exports) {
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
     if (h.act === 'netLeave') { backToSolo(); return; }
+    if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
     if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
     if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
@@ -6009,20 +6063,43 @@ define("js/app.js", function (require, module, exports) {
     }
     if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
     if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
-    if (h.act === 'exitToMenu') { S.pauseOpen = false; doExitHome(); return; }
+    if (h.act === 'exitToMenu') { S.pauseOpen = false; S.ask = { kind: 'exit' }; P.markDirty(); return; }
     if (h.act === 'exitHome') {
-      // 主界面按钮在局内：一次点击只提醒，3 秒内再点才真退出，防误触
-      if (Date.now() > (S.exitPending || 0)) {
-        S.exitPending = Date.now() + 3000;
-        toast('再点一次「主界面」确认离开本局');
-        P.markDirty();
-        setTimeout(function () {
-          if (S.exitPending && Date.now() >= S.exitPending) { S.exitPending = 0; P.markDirty(); }
-        }, 3100);
+      // 点「主界面」先问一句，不直接退
+      S.pauseOpen = false;
+      S.ask = { kind: 'exit' };
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'dissolve') {
+      S.pauseOpen = false;
+      S.ask = { kind: 'dissolve' };
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'askNo') { S.ask = null; P.markDirty(); return; }
+    if (h.act === 'askYes') {
+      var kind = S.ask ? S.ask.kind : 'exit';
+      S.ask = null;
+      if (kind === 'dissolve') {
+        if (S.mode === 'online') {
+          NET.send({ t: 'dissolve' });
+          // 等一帧让消息先发出去，再关连接
+          setTimeout(function () { backToSolo(); openLobby(); }, 250);
+        } else {
+          backToSolo();
+          openLobby();
+        }
+        toast('房间已解散');
         return;
       }
-      S.exitPending = 0;
-      S.pauseOpen = false;
+      if (S.mode === 'online') {
+        // 先告诉服务端「主动离开→座位转托管」，再回大厅
+        NET.send({ t: 'leave' });
+        setTimeout(function () { doExitHome(); }, 250);
+        toast('已退出，座位由机器人托管');
+        return;
+      }
       doExitHome();
       return;
     }
@@ -6179,6 +6256,8 @@ define("js/app.js", function (require, module, exports) {
       var qs = (window.location && window.location.search) || '';
       if (/tools=1/.test(qs)) S.toolsOpen = true;
       if (/pause=1/.test(qs)) S.pauseOpen = true;
+      if (/askExit=1/.test(qs)) S.ask = { kind: 'exit' };
+      if (/askDissolve=1/.test(qs)) S.ask = { kind: 'dissolve' };
       if (/stats=1/.test(qs)) { S.statsOpen = true; S.stats = loadStats(); }
       if (/record=1/.test(qs)) S.recordOpen = true;
       if (/guide=1/.test(qs)) { S.guideOpen = true; S.guidePage = 0; }
