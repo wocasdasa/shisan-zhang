@@ -54,6 +54,7 @@
     hintIdx: 0,           // 提示候选轮换游标
     recordOpen: false,    // 记牌器
     toolsOpen: false,     // 更多（工具抽屉）
+    pauseOpen: false,     // 对局内菜单（返回主界面 / 托管 / 引导 …）
     statsOpen: false,     // 战绩
     replayOpen: false,    // 复盘
     guideOpen: false,     // 新手引导
@@ -1474,6 +1475,11 @@
       return !(act === 'toolsClose' || act === 'stats' || act === 'replay' || act === 'guide' ||
         act === 'share' || act === 'music' || act === 'vib' || act === 'skin' || act === 'record');
     }
+    if (S.pauseOpen) {
+      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'auto' || act === 'record' ||
+        act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
+        act === 'music' || act === 'vib' || act === 'skin');
+    }
     if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText');
     return false;
   }
@@ -1584,21 +1590,46 @@
       P.markDirty();
       return;
     }
-    if (h.act === 'tools') { S.toolsOpen = !S.toolsOpen; if (S.toolsOpen) S.recordOpen = false; P.markDirty(); return; }
+    if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
+    if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
+    if (h.act === 'exitToMenu') {
+      S.pauseOpen = false;
+      if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
+      clearTurnTimer();
+      clearTributeTimer();
+      SFX.flush();
+      S.phase = 'menu';
+      S.testMenu = false;
+      S.testDeck = false;
+      S.summary = false;
+      S.game = null;
+      S.deal = null;
+      S.tribute = null;
+      S.selected = [];
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'tools') {
+      S.toolsOpen = !S.toolsOpen;
+      if (S.toolsOpen) { S.pauseOpen = false; S.recordOpen = false; }
+      P.markDirty();
+      return;
+    }
     if (h.act === 'toolsClose') { S.toolsOpen = false; P.markDirty(); return; }
-    if (h.act === 'stats') { S.statsOpen = true; S.toolsOpen = false; S.stats = loadStats(); P.markDirty(); return; }
+    if (h.act === 'stats') { S.statsOpen = true; S.toolsOpen = false; S.pauseOpen = false; S.stats = loadStats(); P.markDirty(); return; }
     if (h.act === 'statsClose') { S.statsOpen = false; P.markDirty(); return; }
     if (h.act === 'record') {
       S.recordOpen = !S.recordOpen;
       S.toolsOpen = false;
+      S.pauseOpen = false;
       if (S.recordOpen) toast('记牌器已展开：手牌下方显示各点数剩余');
       P.markDirty();
       return;
     }
     if (h.act === 'recordClose') { S.recordOpen = false; P.markDirty(); return; }
-    if (h.act === 'replay') { S.replayOpen = true; P.markDirty(); return; }
+    if (h.act === 'replay') { S.replayOpen = true; S.pauseOpen = false; P.markDirty(); return; }
     if (h.act === 'replayClose') { S.replayOpen = false; P.markDirty(); return; }
-    if (h.act === 'guide') { S.guideOpen = true; S.guidePage = 0; P.markDirty(); return; }
+    if (h.act === 'guide') { S.guideOpen = true; S.guidePage = 0; S.pauseOpen = false; P.markDirty(); return; }
     if (h.act === 'guidePrev') { S.guidePage = Math.max(0, (S.guidePage || 0) - 1); P.markDirty(); return; }
     if (h.act === 'guideNext') {
       S.guidePage = Math.min(2, (S.guidePage || 0) + 1);
@@ -1725,11 +1756,12 @@
     try {
       isDemo = /demo=/.test((window.location && window.location.search) || '');
     } catch (e) {}
-    if (!S.guideDone && !isDemo) { S.guideOpen = true; S.guidePage = 0; }
+    // 新手引导不再开局自动弹：只从页头「引导」chip / 更多抽屉手动打开
     // 预览调试开关：?tools=1 / stats=1 / record=1 / replay=1 / guide=1
     try {
       var qs = (window.location && window.location.search) || '';
       if (/tools=1/.test(qs)) S.toolsOpen = true;
+      if (/pause=1/.test(qs)) S.pauseOpen = true;
       if (/stats=1/.test(qs)) { S.statsOpen = true; S.stats = loadStats(); }
       if (/record=1/.test(qs)) S.recordOpen = true;
       if (/guide=1/.test(qs)) { S.guideOpen = true; S.guidePage = 0; }

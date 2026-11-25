@@ -2866,6 +2866,19 @@ define("js/views.js", function (require, module, exports) {
     txt(ctx, autoOn ? '托管中' : '托管', x2 + 39, y2 + h2 / 2, fs2,
       autoOn ? '#ffffff' : C.text);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'auto' });
+
+    // 引导：只手动点开，不自动弹
+    x2 -= gap2 + 78;
+    box(ctx, x2, y2, 78, h2, rad2, 'rgba(216,179,106,0.14)', C.goldDim);
+    txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
+    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
+
+    // 对局菜单：返回主界面 / 托管 / 记牌 / 战绩 / 音乐…
+    x2 -= gap2 + 78;
+    box(ctx, x2, y2, 78, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
+      S.pauseOpen ? C.gold : C.panelLine);
+    txt(ctx, '菜单', x2 + 39, y2 + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text);
+    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'pause' });
   }
 
   // ---------- 座位 ----------
@@ -4223,6 +4236,45 @@ define("js/views.js", function (require, module, exports) {
   }
 
 
+  // ---------- 对局内菜单 ----------
+  function pausePanel(ctx, S, L, hits) {
+    if (!S.pauseOpen) return;
+    var pw = 640, ph = L.landscape ? 540 : 560;
+    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
+    overlay(ctx, L.H, W, pw);
+    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
+    txt(ctx, '对局菜单', W / 2, py + 46, 22, C.gold, 'center', 600);
+    var st = S.stats || {};
+    txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '单机 · 三家 AI') +
+      ' · 第 ' + Math.max(1, S.round) + '/' + S.rounds + ' 局 · 战绩 ' + (st.wins || 0) + ' 胜',
+      W / 2, py + 72, 13, C.dim, 'center');
+
+    var cw = (pw - 48 - 16) / 2, ch = 62;
+    var gx = px + 24, gy = py + 92;
+    var items = [
+      { label: '返回主界面', sub: S.mode === 'online' ? '离开房间回标题' : '结束本场回标题', act: 'exitToMenu' },
+      { label: S.auto ? '取消托管' : '托管', sub: S.auto ? '正在自动出牌' : '轮到你自动出最小牌', act: 'auto', on: !!S.auto },
+      { label: '记牌器', sub: S.recordOpen ? '已展开' : '已收起', act: 'record', on: !!S.recordOpen },
+      { label: '新手引导', sub: '3 页图解规则', act: 'guide' },
+      { label: '我的战绩', sub: '胜率 / 连胜 / 排行榜', act: 'stats' },
+      { label: '复盘回放', sub: '本局每一手出牌', act: 'replay' },
+      { label: '分享战绩', sub: '本场分 + 连胜', act: 'share' },
+      { label: '背景音乐', sub: S.musicOn ? '已开启' : '已关闭', act: 'music', on: !!S.musicOn },
+      { label: '震动反馈', sub: S.vibOn ? '已开启' : '已关闭', act: 'vib', on: !!S.vibOn },
+      { label: '牌背皮肤', sub: ['经典红', '青竹', '鎏金'][S.skin || 0], act: 'skin' }
+    ];
+    items.forEach(function (it, i) {
+      var c = i % 2, r = Math.floor(i / 2);
+      toolButton(ctx, gx + c * (cw + 16), gy + r * (ch + 12), cw, ch,
+        it.label, it.sub, !!it.on, it.act, hits, 0);
+    });
+
+    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '继续游戏', W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'pauseClose' });
+  }
+
+
   function draw(ctx, S, H, wW) {
     if (wW) W = wW;
     SKIN = S.skin || 0;
@@ -4269,6 +4321,7 @@ define("js/views.js", function (require, module, exports) {
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
     if (S.chatOpen) chatPanel(ctx, S, L, hits);
     if (S.toolsOpen) toolsDrawer(ctx, S, L, hits);
+    if (S.pauseOpen) pausePanel(ctx, S, L, hits);
     if (S.statsOpen) statsPanel(ctx, S, L, hits);
     if (S.replayOpen) replayPanel(ctx, S, L, hits);
     if (S.testMenu) testPanel(ctx, S, L, hits);
@@ -4342,6 +4395,7 @@ define("js/app.js", function (require, module, exports) {
     hintIdx: 0,           // 提示候选轮换游标
     recordOpen: false,    // 记牌器
     toolsOpen: false,     // 更多（工具抽屉）
+    pauseOpen: false,     // 对局内菜单（返回主界面 / 托管 / 引导 …）
     statsOpen: false,     // 战绩
     replayOpen: false,    // 复盘
     guideOpen: false,     // 新手引导
@@ -5762,6 +5816,11 @@ define("js/app.js", function (require, module, exports) {
       return !(act === 'toolsClose' || act === 'stats' || act === 'replay' || act === 'guide' ||
         act === 'share' || act === 'music' || act === 'vib' || act === 'skin' || act === 'record');
     }
+    if (S.pauseOpen) {
+      return !(act === 'pauseClose' || act === 'exitToMenu' || act === 'auto' || act === 'record' ||
+        act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
+        act === 'music' || act === 'vib' || act === 'skin');
+    }
     if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText');
     return false;
   }
@@ -5872,21 +5931,46 @@ define("js/app.js", function (require, module, exports) {
       P.markDirty();
       return;
     }
-    if (h.act === 'tools') { S.toolsOpen = !S.toolsOpen; if (S.toolsOpen) S.recordOpen = false; P.markDirty(); return; }
+    if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
+    if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
+    if (h.act === 'exitToMenu') {
+      S.pauseOpen = false;
+      if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
+      clearTurnTimer();
+      clearTributeTimer();
+      SFX.flush();
+      S.phase = 'menu';
+      S.testMenu = false;
+      S.testDeck = false;
+      S.summary = false;
+      S.game = null;
+      S.deal = null;
+      S.tribute = null;
+      S.selected = [];
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'tools') {
+      S.toolsOpen = !S.toolsOpen;
+      if (S.toolsOpen) { S.pauseOpen = false; S.recordOpen = false; }
+      P.markDirty();
+      return;
+    }
     if (h.act === 'toolsClose') { S.toolsOpen = false; P.markDirty(); return; }
-    if (h.act === 'stats') { S.statsOpen = true; S.toolsOpen = false; S.stats = loadStats(); P.markDirty(); return; }
+    if (h.act === 'stats') { S.statsOpen = true; S.toolsOpen = false; S.pauseOpen = false; S.stats = loadStats(); P.markDirty(); return; }
     if (h.act === 'statsClose') { S.statsOpen = false; P.markDirty(); return; }
     if (h.act === 'record') {
       S.recordOpen = !S.recordOpen;
       S.toolsOpen = false;
+      S.pauseOpen = false;
       if (S.recordOpen) toast('记牌器已展开：手牌下方显示各点数剩余');
       P.markDirty();
       return;
     }
     if (h.act === 'recordClose') { S.recordOpen = false; P.markDirty(); return; }
-    if (h.act === 'replay') { S.replayOpen = true; P.markDirty(); return; }
+    if (h.act === 'replay') { S.replayOpen = true; S.pauseOpen = false; P.markDirty(); return; }
     if (h.act === 'replayClose') { S.replayOpen = false; P.markDirty(); return; }
-    if (h.act === 'guide') { S.guideOpen = true; S.guidePage = 0; P.markDirty(); return; }
+    if (h.act === 'guide') { S.guideOpen = true; S.guidePage = 0; S.pauseOpen = false; P.markDirty(); return; }
     if (h.act === 'guidePrev') { S.guidePage = Math.max(0, (S.guidePage || 0) - 1); P.markDirty(); return; }
     if (h.act === 'guideNext') {
       S.guidePage = Math.min(2, (S.guidePage || 0) + 1);
@@ -6013,11 +6097,12 @@ define("js/app.js", function (require, module, exports) {
     try {
       isDemo = /demo=/.test((window.location && window.location.search) || '');
     } catch (e) {}
-    if (!S.guideDone && !isDemo) { S.guideOpen = true; S.guidePage = 0; }
+    // 新手引导不再开局自动弹：只从页头「引导」chip / 更多抽屉手动打开
     // 预览调试开关：?tools=1 / stats=1 / record=1 / replay=1 / guide=1
     try {
       var qs = (window.location && window.location.search) || '';
       if (/tools=1/.test(qs)) S.toolsOpen = true;
+      if (/pause=1/.test(qs)) S.pauseOpen = true;
       if (/stats=1/.test(qs)) { S.statsOpen = true; S.stats = loadStats(); }
       if (/record=1/.test(qs)) S.recordOpen = true;
       if (/guide=1/.test(qs)) { S.guideOpen = true; S.guidePage = 0; }
