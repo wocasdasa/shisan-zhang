@@ -2177,11 +2177,15 @@ define("js/platform.js", function (require, module, exports) {
 
 });
 
-define("js/views.js", function (require, module, exports) {
-// 画布视图：把牌桌状态画到 canvas 上，同时产出可点击热区
-(function () {
-  var W = 750;
-  var lastH = 0; // draw() 记录画布高，供 banner() 定位（其签名不含 H）
+define("js/views/base.js", function (require, module, exports) {
+// 绘制原语、几何与特效：不依赖任何其它视图模块
+// 由 views.js 拆分而来；state 里的 W/lastH/SKIN 是跨模块共享的可变状态
+// 改动这里等于改所有界面，改完跑 node tools/shot-matrix.js 做像素回归
+module.exports = function () {
+
+  // 跨函数共享的可变状态：横屏宽 / 画布高 / 牌背皮肤
+  var state = { W: 750, lastH: 0, SKIN: 0 };
+
   var C = {
     bg0: '#0a121f',
     bg1: '#16273f',
@@ -2212,7 +2216,7 @@ define("js/views.js", function (require, module, exports) {
   // 手牌底排居中、操作条底部成组。横屏设计高恒为 750（宽随屏幕比例伸缩），
   // 所以这套「以底边为锚」的绝对节奏在两种方向都成立（竖屏 1334 高只是上下更宽松）。
   function layout(H) {
-    var landscape = (W / H) >= 1.2;
+    var landscape = (state.W / H) >= 1.2;
     var headerH = 118;                 // 第二排工具 chip 需要高度（托管/记牌/更多）
     var seatW = 176, seatH = 64;
     var rowY = headerH + 8;            // 顶排座位牌紧贴页头下沿
@@ -2224,9 +2228,9 @@ define("js/views.js", function (require, module, exports) {
       landscape: landscape,
       table: { top: tableTop, bottom: handY - 96 },
       seats: {
-        north: { x: W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
+        north: { x: state.W / 2 - seatW / 2, y: rowY, w: seatW, h: seatH },
         west: { x: 22, y: rowY, w: seatW, h: seatH },
-        east: { x: W - 22 - seatW, y: rowY, w: seatW, h: seatH },
+        east: { x: state.W - 22 - seatW, y: rowY, w: seatW, h: seatH },
         // 自家座位牌回到操作条左侧（底部整条带子仍是手牌）；操作条整组避开它、往右排
         south: { x: 20, y: (H - 232) + (74 - seatH) / 2, w: 148, h: seatH }
       },
@@ -2265,28 +2269,13 @@ define("js/views.js", function (require, module, exports) {
   }
 
   // 牌背皮肤：0 经典红 / 1 青竹 / 2 鎏金（S.skin 决定，draw 时同步）
-  var SKIN = 0;
   var SKINS = [
     { fill: '#8c2f2a', line: 'rgba(255,225,205,0.5)', deco: 'rgba(255,225,205,0.35)' },
     { fill: '#2b5c47', line: 'rgba(214,240,225,0.5)', deco: 'rgba(214,240,225,0.32)' },
     { fill: '#6d5423', line: 'rgba(255,238,196,0.55)', deco: 'rgba(255,238,196,0.35)' }
   ];
 
-  function drawBack(ctx, x, y, w, h) {
-    var sk = SKINS[SKIN] || SKINS[0];
-    box(ctx, x, y, w, h, Math.max(3, w * 0.1), sk.fill, sk.line);
-    ctx.save();
-    ctx.globalAlpha = 0.35;
-    ctx.strokeStyle = sk.deco;
-    ctx.lineWidth = 1;
-    for (var i = 1; i < 4; i++) {
-      ctx.beginPath();
-      ctx.moveTo(x + 2, y + h * i / 4);
-      ctx.lineTo(x + w - 2, y + h * i / 4);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
+
 
   function txt(ctx, s, x, y, size, color, align, weight) {
     ctx.font = (weight || 400) + ' ' + size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -2303,14 +2292,14 @@ define("js/views.js", function (require, module, exports) {
     g.addColorStop(0.45, C.felt);
     g.addColorStop(1, C.bg0);
     ctx.fillStyle = g;
-    ctx.fillRect(-12, -12, W + 24, H + 24); // 外扩 12px：四条震屏 translate 时不露白边
+    ctx.fillRect(-12, -12, state.W + 24, H + 24); // 外扩 12px：四条震屏 translate 时不露白边
 
     // 牌桌内框：顶边起于顶排座位牌之下（竖横屏同一来源，见 layout 的 tableTop）
     var pad = 48;
     var inner = {
       x: pad,
       y: L.table.top,
-      w: W - pad * 2,
+      w: state.W - pad * 2,
       h: L.table.bottom - L.table.top
     };
     box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
@@ -2318,8 +2307,8 @@ define("js/views.js", function (require, module, exports) {
     // 水印（放两侧留白，避免压住出牌区）
     ctx.save();
     ctx.globalAlpha = 0.07;
-    txt(ctx, '♠', inner.x + inner.w * 0.16, inner.y + inner.h * 0.3, Math.min(W, H) * 0.16, '#ffffff');
-    txt(ctx, '♠', inner.x + inner.w * 0.84, inner.y + inner.h * 0.74, Math.min(W, H) * 0.16, '#ffffff');
+    txt(ctx, '♠', inner.x + inner.w * 0.16, inner.y + inner.h * 0.3, Math.min(state.W, H) * 0.16, '#ffffff');
+    txt(ctx, '♠', inner.x + inner.w * 0.84, inner.y + inner.h * 0.74, Math.min(state.W, H) * 0.16, '#ffffff');
     ctx.restore();
   }
 
@@ -2359,7 +2348,7 @@ define("js/views.js", function (require, module, exports) {
   }
 
   function drawBack(ctx, x, y, w, h) {
-    var sk = SKINS[SKIN] || SKINS[0];
+    var sk = SKINS[state.SKIN] || SKINS[0];
     var r = Math.max(4, w * 0.08);
     box(ctx, x, y, w, h, r, sk.fill, sk.line);
     ctx.save();
@@ -2431,7 +2420,7 @@ define("js/views.js", function (require, module, exports) {
     ctx.save();
     for (var i = 0; i < n; i++) {
       var seed = (i * 73 + 11) % 997;
-      var x = (seed / 997) * (W - 40) + 20 + Math.sin(p * 5 + i) * 22;
+      var x = (seed / 997) * (state.W - 40) + 20 + Math.sin(p * 5 + i) * 22;
       var y = -30 + easeOut(Math.min(1, p * 1.15)) * (H + 80) * (0.35 + ((i * 29) % 60) / 100);
       var col = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
       ctx.save();
@@ -2468,12 +2457,12 @@ define("js/views.js", function (require, module, exports) {
     if (a <= 0) return;
     // 字号按短边取：竖屏=750 宽，横屏=750 高，避免横屏 W（可 1333+）把字放大到压住出牌区
     var size = L.landscape
-      ? Math.max(30, Math.round(Math.min(W, L.H) * 0.045))
-      : Math.max(30, Math.round(W * 0.058));
+      ? Math.max(30, Math.round(Math.min(state.W, L.H) * 0.045))
+      : Math.max(30, Math.round(state.W * 0.058));
     // 横屏牌桌带只有 ~210 高：横幅贴内框上沿，与出牌区标题留出间隙；竖屏保持 0.30H 定稿位
-    var cy = L.landscape ? L.table.top + 24 : Math.round((lastH || 640) * 0.30);
+    var cy = L.landscape ? L.table.top + 24 : Math.round((state.lastH || 640) * 0.30);
     ctx.save();
-    ctx.translate(W / 2, cy);
+    ctx.translate(state.W / 2, cy);
     ctx.scale(s, s);
     ctx.globalAlpha = Math.max(0, Math.min(1, a));
     ctx.font = '700 ' + size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -2549,7 +2538,7 @@ define("js/views.js", function (require, module, exports) {
   function identityFx(ctx, S, L, p, seat, rank) {
     if (typeof seat !== 'number' || seat < 0 || seat > 3) seat = 2;
     if (rank !== 3 && rank !== 14) rank = 3;
-    var cx = W / 2;
+    var cx = state.W / 2;
     var cy = Math.min(L.center.y, L.hand.y - 90);
     var rect = L.seats[SEAT_POS[seat]];
     var br = 12;
@@ -2630,7 +2619,7 @@ define("js/views.js", function (require, module, exports) {
   // 结束后画面归零，仅剩 seatPlate 的朱红边框常驻；座位高亮脉冲只在 T3 结构之外叠加。
   function loneRevealFx(ctx, S, L, H, p, seat) {
     if (p >= 1) return; // 结束后：特效层清空，独食者座位朱红边框常驻
-    var cx = W / 2;
+    var cx = state.W / 2;
     // 横屏牌桌带更矮：整体上移到内框上沿下方，保证「独食」大字落在带内（不压底排座位牌/手牌）
     var cy = L.landscape ? L.table.top + 72 : Math.min(L.center.y, L.hand.y - 90);
     var fade = p > 0.85 ? Math.max(0, 1 - (p - 0.85) / 0.15) : 1;
@@ -2639,7 +2628,7 @@ define("js/views.js", function (require, module, exports) {
     var dimA = 0.4 * Math.min(1, p / 0.2) * fade;
     ctx.save();
     ctx.fillStyle = 'rgba(4,8,16,' + dimA.toFixed(3) + ')';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, state.W, H);
     ctx.restore();
 
     // 第一幕（0-0.45）：♠3/♠A 自左右两侧飞入中央合并，放大至 1.6 倍；落定后保持
@@ -2648,7 +2637,7 @@ define("js/views.js", function (require, module, exports) {
     var ch = 82 * (1 + 0.6 * t);
     var gap = cw * 0.3;
     var x3 = -70 + (cx - gap + 70) * t;
-    var xA = W + 70 + (cx + gap - W - 70) * t;
+    var xA = state.W + 70 + (cx + gap - state.W - 70) * t;
     var r3 = -0.55 * (1 - t) - 0.06;
     var rA = 0.55 * (1 - t) + 0.06;
     var cardA = Math.min(1, p / 0.08) * fade;
@@ -2671,7 +2660,7 @@ define("js/views.js", function (require, module, exports) {
       var q = (p - 0.45) / 0.55;
       var sq = easeOut(Math.min(1, q * 1.6)); // 快砸：前段完成大部分缩放
       // 字号按短边取：横屏（W 远大于 H）不再被 W 放大到压住底排
-      var size = Math.max(44, Math.round((L.landscape ? Math.min(W, H) : W) * 0.085));
+      var size = Math.max(44, Math.round((L.landscape ? Math.min(state.W, H) : state.W) * 0.085));
       var ty = cy + ch / 2 + 46;
       // 黑红粒子爆发：13 黑 + 13 朱红 = 26 枚（预算推导见 task-7 报告）
       burst(ctx, cx, ty, q, 13, 190, '20,24,32');
@@ -2712,7 +2701,7 @@ define("js/views.js", function (require, module, exports) {
 
   // 牌型专属特效：环数、色带、闪光按牌型递进；非单张叠加横幅；cards 为该手牌数组（供同花着色）
   function kindFx(ctx, S, L, H, k, p, cards) {
-    var cx = W / 2;
+    var cx = state.W / 2;
     var cy = Math.min(L.center.y, L.hand.y - 90);
     var fade = Math.max(0, 1 - p);
     if (k === 'pair') {
@@ -2768,7 +2757,7 @@ define("js/views.js", function (require, module, exports) {
       ctx.strokeStyle = 'rgb(255,196,128)';
       ctx.lineWidth = 11 * (1 - p) + 2;
       ctx.beginPath();
-      ctx.arc(cx, cy, 40 + sq * Math.max(W, H) * 0.42, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 40 + sq * Math.max(state.W, H) * 0.42, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
       ring(ctx, cx, cy, 150, Math.min(1, p * 0.9), '255,150,110');
@@ -2777,7 +2766,7 @@ define("js/views.js", function (require, module, exports) {
       ctx.save();
       ctx.globalAlpha = Math.max(0, 0.42 * (1 - p * 1.8));
       ctx.fillStyle = '#ffcf9a';
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(0, 0, state.W, H);
       ctx.restore();
     } else if (k === 'straightflush') {
       var cols = ['255,140,120', '255,206,120', '255,246,180', '150,226,180', '150,206,255', '206,164,255'];
@@ -2787,8 +2776,8 @@ define("js/views.js", function (require, module, exports) {
       burst(ctx, cx, cy, p, 34, 240, '255,240,200');
       // 满屏流光：线性渐变带从左到右扫过，400ms
       var sp = Math.min(1, p * 640 / 400);
-      var band = Math.max(60, W * 0.22);
-      var sx = -band + (W + band * 2) * sp;
+      var band = Math.max(60, state.W * 0.22);
+      var sx = -band + (state.W + band * 2) * sp;
       var grad = ctx.createLinearGradient(sx - band, 0, sx + band, 0);
       grad.addColorStop(0, 'rgba(255,244,196,0)');
       grad.addColorStop(0.5, 'rgba(255,244,196,0.5)');
@@ -2796,12 +2785,12 @@ define("js/views.js", function (require, module, exports) {
       ctx.save();
       ctx.globalAlpha = 0.85 * (1 - sp * 0.35);
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(0, 0, state.W, H);
       ctx.restore();
       ctx.save();
       ctx.globalAlpha = Math.max(0, 0.46 * (1 - p * 2));
       ctx.fillStyle = '#fff1c9';
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(0, 0, state.W, H);
       ctx.restore();
     } else {
       ring(ctx, cx, cy, 120, Math.min(1, p), '255,216,140');
@@ -2828,10 +2817,10 @@ define("js/views.js", function (require, module, exports) {
         return;
       }
       var dcy = Math.min(L.center.y, L.hand.y - 90);
-      ring(ctx, W / 2, dcy, 150, dp);
-      burst(ctx, W / 2, dcy, dp, 18, 132, '255,216,140');
-      burst(ctx, W / 2, L.hand.y - 56, dp, 16, 160, '176,232,255');
-      burst(ctx, W / 2, L.hand.y - 44, dp, 14, 130, '255,226,160');
+      ring(ctx, state.W / 2, dcy, 150, dp);
+      burst(ctx, state.W / 2, dcy, dp, 18, 132, '255,216,140');
+      burst(ctx, state.W / 2, L.hand.y - 56, dp, 16, 160, '176,232,255');
+      burst(ctx, state.W / 2, L.hand.y - 44, dp, 14, 130, '255,226,160');
       confetti(ctx, S, Math.min(1, dp * 1.2), H);
       return;
     }
@@ -2845,11 +2834,11 @@ define("js/views.js", function (require, module, exports) {
     }
     if (S.fx.drawT0) {
       var p2 = (now - S.fx.drawT0) / 380;
-      if (p2 >= 0 && p2 < 1) burst(ctx, W / 2, L.hand.y - 56, p2, 14, 116, '176,232,255');
+      if (p2 >= 0 && p2 < 1) burst(ctx, state.W / 2, L.hand.y - 56, p2, 14, 116, '176,232,255');
     }
     if (S.fx.retT0) {
       var p3 = (now - S.fx.retT0) / 340;
-      if (p3 >= 0 && p3 < 1) burst(ctx, W / 2, L.hand.y - 44, p3, 12, 96, '255,226,160');
+      if (p3 >= 0 && p3 < 1) burst(ctx, state.W / 2, L.hand.y - 44, p3, 12, 96, '255,226,160');
     }
     if (S.fx.settleT0) {
       var p4 = (now - S.fx.settleT0) / 1000;
@@ -2872,6 +2861,197 @@ define("js/views.js", function (require, module, exports) {
     return p <= 0 ? 0 : p >= 1 ? 1 : p;
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+  function kindLabel(kind) {
+    var m = {
+      single: '单张', pair: '对子', trio: '三个', straight: '顺子',
+      flush: '同花', fullhouse: '葫芦', four: '四条', straightflush: '同花顺'
+    };
+    return m[kind] || kind;
+  }
+
+
+
+
+
+
+
+  function pill(ctx, x, y, w, h, label, enabled, hits, act, tone, labelDx) {
+    var r = h / 2;
+    var fill = !enabled ? 'rgba(16,28,46,0.55)' : tone === 'blue' ? '#3b86d8' : '#e9b84d';
+    var line = !enabled ? 'rgba(216,179,106,0.14)' : tone === 'blue' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.5)';
+    box(ctx, x, y, w, h, r, fill, line);
+    if (enabled) {
+      ctx.save();
+      var lg = ctx.createLinearGradient(0, y, 0, y + h);
+      lg.addColorStop(0, 'rgba(255,255,255,0.45)');
+      lg.addColorStop(0.5, 'rgba(255,255,255,0.08)');
+      lg.addColorStop(1, 'rgba(0,0,0,0.12)');
+      rr(ctx, x, y, w, h, r);
+      ctx.fillStyle = lg;
+      ctx.fill();
+      ctx.restore();
+    }
+    txt(ctx, label, x + w / 2 + (labelDx || 0), y + h / 2 + 1, 18,
+      enabled ? (tone === 'blue' ? '#ffffff' : '#4a2f08') : 'rgba(242,234,216,0.4)', 'center', 600);
+    if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
+  }
+
+  function clockChip(ctx, cx, cy, r, left, active) {
+    var leftN = Math.max(0, left || 0);
+    var warn = active && leftN <= 5;
+    var ring = warn ? '#d8412f' : '#e9b84d';
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = active ? '#fffaf0' : 'rgba(255,255,255,0.34)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = ring;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.46, cy - r * 0.94, r * 0.19, 0, Math.PI * 2);
+    ctx.fillStyle = ring;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + r * 0.46, cy - r * 0.94, r * 0.19, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    txt(ctx, String(leftN), cx, cy + r * 0.3, Math.round(r * 0.92),
+      warn ? '#d8412f' : '#5a3a12', 'center', 700);
+  }
+
+  function btn(ctx, x, y, w, h, label, enabled, hits, act, primary) {
+    if (primary && enabled) {
+      box(ctx, x, y, w, h, 10, C.gold, null);
+      txt(ctx, label, x + w / 2, y + h / 2, 21, '#101f33', 'center', 600);
+    } else {
+      box(ctx, x, y, w, h, 10, enabled ? C.btn : 'rgba(16,28,46,0.6)',
+        enabled ? C.panelLine : 'rgba(216,179,106,0.12)');
+      txt(ctx, label, x + w / 2, y + h / 2, 21, enabled ? C.text : 'rgba(242,234,216,0.35)');
+    }
+    if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
+  }
+
+  // ---------- 进贡面板 ----------
+  function cardTxt(c) {
+    var r = c.r === 11 ? 'J' : c.r === 12 ? 'Q' : c.r === 13 ? 'K' : c.r === 14 ? 'A' : String(c.r);
+    return SUIT[c.s] + r;
+  }
+
+
+  // ---------- 结算 ----------
+  function overlay(ctx, H, w, h) {
+    ctx.fillStyle = 'rgba(5,10,18,0.72)';
+    ctx.fillRect(0, 0, state.W, H);
+  }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  // ---------- 新手引导 ----------
+  var GUIDE_PAGES = [
+    {
+      t: '一、认牌与大小',
+      lines: [
+        '整副 52 张、四家各 13 张，没有大小王。',
+        '点数 3 最大、4 最小：3 > 2 > A > K > … > 5 > 4。',
+        '同点数比花色：♠ > ♥ > ♣ > ♦。',
+        '♦4 是起手牌：每局第一手必须带 ♦4。'
+      ]
+    },
+    {
+      t: '二、牌型与出牌',
+      lines: [
+        '单张、对子、三个、顺子（≥5 张连续）、同花顺、葫芦。',
+        '对子/三个比「其中较大那张」的点数与花色。',
+        '顺子按最大张比；同花顺比顺子大。',
+        '压不过就「不出」，四家都过则由上家重新起手。'
+      ]
+    },
+    {
+      t: '三、朋友与独食',
+      lines: [
+        '♠3 与 ♠A 同持 ＝ 独食，1 打 3，两家都赢你就算你输。',
+        '不独食就按身份牌分两队：持 ♠3 与持 ♠A 的两人是朋友。',
+        '名次：先出完 1、2、3、4，按名次计分并决定进贡。',
+        '下一局：输家给赢家进贡（重贡 4/2，轻贡 2/1）。'
+      ]
+    }
+  ];
+
+  return {
+    state, C, SEAT_NAMES, SEAT_POS, SUIT, RANK_TXT, SKINS, DEAL_ORDER, CONFETTI_COLORS, FLUSH_RGB, GUIDE_PAGES,
+    banner, bg, box, btn, burst, cardTxt, clockChip, confetti, dealState, drawBack, drawCard, drawSpade, easeOut, flushRgb, fxOverlay, fxProgress, fxShake, identityFx, isRed, kindFx, kindLabel, layout, loneRevealFx, overlay, pill, rankText, ring, rr, txt
+  };
+};
+});
+
+define("js/views/table.js", function (require, module, exports) {
+// 牌桌主体：页头、座位、中央出牌区、手牌与操作条
+// 依赖 views/base.js（由 views.js 拆分而来，函数体保持原样）
+module.exports = function (B) {
+  // 同名接住上层导出，函数体保持原样
+  var state = B.state; // 共享可变状态，改的是 state 上的字段
+  var C = B.C;
+  var SEAT_NAMES = B.SEAT_NAMES;
+  var SEAT_POS = B.SEAT_POS;
+  var box = B.box;
+  var clockChip = B.clockChip;
+  var dealState = B.dealState;
+  var drawBack = B.drawBack;
+  var drawCard = B.drawCard;
+  var easeOut = B.easeOut;
+  var fxProgress = B.fxProgress;
+  var kindLabel = B.kindLabel;
+  var pill = B.pill;
+  var rankText = B.rankText;
+  var rr = B.rr;
+  var txt = B.txt;
+
   // ---------- 页头 ----------
   function header(ctx, S, L, hits) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
@@ -2882,7 +3062,7 @@ define("js/views.js", function (require, module, exports) {
     hits.push({ x: 16, y: 52, w: 180, h: 26, act: 'mode' });
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
-    var x = W - 24;
+    var x = state.W - 24;
     // 重开
     x -= 78;
     box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
@@ -2923,7 +3103,7 @@ define("js/views.js", function (require, module, exports) {
 
     // 第二排：辅助工具（托管 / 记牌 / 更多），右对齐，避开左侧标题与副标题
     var y2 = 72, h2 = 36, fs2 = 14, rad2 = 18, gap2 = 8;
-    var x2 = W - 24;
+    var x2 = state.W - 24;
     x2 -= 78;
     box(ctx, x2, y2, 78, h2, rad2, S.toolsOpen ? 'rgba(216,179,106,0.22)' : C.btn,
       S.toolsOpen ? C.gold : C.panelLine);
@@ -3238,7 +3418,7 @@ define("js/views.js", function (require, module, exports) {
     var cy = L.center.y;
 
     if (!g) {
-      txt(ctx, '点右上「重开」开始', W / 2, cy, 20, C.dim);
+      txt(ctx, '点右上「重开」开始', state.W / 2, cy, 20, C.dim);
       return;
     }
 
@@ -3247,7 +3427,7 @@ define("js/views.js", function (require, module, exports) {
 
     var plays = g.trickPlays || [];
     if (!plays.length) {
-      txt(ctx, S.phase === 'play' && g.turn >= 0 ? SEAT_NAMES[g.turn] + ' 起手' : '', W / 2, cy, 19, C.dim);
+      txt(ctx, S.phase === 'play' && g.turn >= 0 ? SEAT_NAMES[g.turn] + ' 起手' : '', state.W / 2, cy, 19, C.dim);
       return;
     }
 
@@ -3257,7 +3437,7 @@ define("js/views.js", function (require, module, exports) {
     // 最新一手：放大居中
     var n = newest.cards.length;
     var gap = n >= 8 ? 6 : 12;
-    var maxW = L.landscape ? Math.min(W - 220, 500) : Math.min(W - 260, 470);
+    var maxW = L.landscape ? Math.min(state.W - 220, 500) : Math.min(state.W - 260, 470);
     var chCap = L.landscape
       ? Math.max(56, (L.actions.y - 10) - (L.seats.north.y + L.seats.north.h) - 40)
       : 999;
@@ -3265,7 +3445,7 @@ define("js/views.js", function (require, module, exports) {
     cw = Math.max(28, Math.min(cw, Math.floor(chCap / 1.38), n <= 2 ? 90 : n <= 5 ? 64 : 42));
     var ch = Math.round(cw * 1.38);
     var blockW = n * cw + (n - 1) * gap;
-    var cxB = W / 2;
+    var cxB = state.W / 2;
     var x0 = cxB - blockW / 2;
     var yTop = Math.max(cy - ch / 2, L.seats.north.y + L.seats.north.h + 26);
     yTop = Math.min(yTop, L.actions.y - ch - 8);
@@ -3298,7 +3478,7 @@ define("js/views.js", function (require, module, exports) {
     ctx.fill();
     ctx.restore();
     txt(ctx, SEAT_NAMES[newest.player] + (newest.combo ? ' · ' + kindLabel(newest.combo.kind) : ''),
-      W / 2, yTop - 16, 13, C.gold, 'center', 600);
+      state.W / 2, yTop - 16, 13, C.gold, 'center', 600);
 
     newest.cards.forEach(function (c, i) {
       var mark = c.s === 3 && (c.r === 3 || c.r === 14);
@@ -3310,7 +3490,7 @@ define("js/views.js", function (require, module, exports) {
       var hw = 26, hh = 34, hgap = 2;
       var hx = x0 + blockW + 20;
       var hy = yTop + 10;
-      var maxX = W - 148;
+      var maxX = state.W - 148;
       hist.forEach(function (pl) {
         var bw = pl.cards.length * (hw + hgap);
         if (hx + bw > maxX) return;
@@ -3329,7 +3509,7 @@ define("js/views.js", function (require, module, exports) {
   function dealTable(ctx, S, L, ds) {
     var cy = L.center.y;
     var dw = 68, dh = 94;
-    var dx = W / 2 - dw / 2, dy = cy - dh / 2;
+    var dx = state.W / 2 - dw / 2, dy = cy - dh / 2;
 
     var left = ds.left;
     for (var i = 0; i < Math.min(4, left); i++) {
@@ -3338,7 +3518,7 @@ define("js/views.js", function (require, module, exports) {
       drawBack(ctx, dx + i * 3, dy - i * 3, dw, dh);
       ctx.restore();
     }
-    txt(ctx, '发牌中 · 点击跳过', W / 2, cy + dh / 2 + 34, 16, C.dim);
+    txt(ctx, '发牌中 · 点击跳过', state.W / 2, cy + dh / 2 + 34, 16, C.dim);
 
     if (ds.flying) {
       var seat = ds.flying.seat;
@@ -3358,14 +3538,6 @@ define("js/views.js", function (require, module, exports) {
     }
   }
 
-  function kindLabel(kind) {
-    var m = {
-      single: '单张', pair: '对子', trio: '三个', straight: '顺子',
-      flush: '同花', fullhouse: '葫芦', four: '四条', straightflush: '同花顺'
-    };
-    return m[kind] || kind;
-  }
-
   // ---------- 手牌 ----------
   function hand(ctx, S, L, hits) {
     var g = S.game;
@@ -3373,10 +3545,10 @@ define("js/views.js", function (require, module, exports) {
     var ds = dealState(S);
     var n = ds && !ds.done ? Math.min(mine.length, ds.arrived[0]) : mine.length;
     // 手牌整行居中：南家座位牌已移到手牌正上方，不再占用左侧空间（竖/横屏一致）
-    var avail = W - 48 - L.hand.cardW;
+    var avail = state.W - 48 - L.hand.cardW;
     var step = n > 1 ? Math.min(L.hand.step, Math.max(26, avail / (n - 1))) : L.hand.step;
     var totalW = (n - 1) * step + L.hand.cardW;
-    var hx = Math.max(24, Math.round((W - totalW) / 2));
+    var hx = Math.max(24, Math.round((state.W - totalW) / 2));
 
     mine.slice(0, n).forEach(function (c, i) {
       var sel = S.selected.some(function (s) { return s.r === c.r && s.s === c.s; });
@@ -3408,7 +3580,7 @@ define("js/views.js", function (require, module, exports) {
     var total = wHint + gapB + wPass + gapB + wPlay;
     // 操作条避开头像块：在「头像右侧 ~ 屏幕右边距」这段里居中（不再按整屏中线，偏右一点）
     var plate = L.seats.south;
-    var zoneL = plate.x + plate.w + 12, zoneR = W - 16;
+    var zoneL = plate.x + plate.w + 12, zoneR = state.W - 16;
     var bx = Math.round((zoneL + zoneR) / 2 - total / 2);
     bx = Math.max(zoneL, Math.min(bx, zoneR - total));
 
@@ -3427,72 +3599,32 @@ define("js/views.js", function (require, module, exports) {
   function chatEntry(ctx, S, L, hits) {
     if (S.mode !== 'online' || !S.room) return;
     var w = 64, h = 44;
-    var x = W - 16 - w, y = L.actions.y + (L.actions.h - h) / 2;
+    var x = state.W - 16 - w, y = L.actions.y + (L.actions.h - h) / 2;
     pill(ctx, x, y, w, h, '发言', true, hits, 'chatOpen', 'gold');
   }
 
-  function pill(ctx, x, y, w, h, label, enabled, hits, act, tone, labelDx) {
-    var r = h / 2;
-    var fill = !enabled ? 'rgba(16,28,46,0.55)' : tone === 'blue' ? '#3b86d8' : '#e9b84d';
-    var line = !enabled ? 'rgba(216,179,106,0.14)' : tone === 'blue' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.5)';
-    box(ctx, x, y, w, h, r, fill, line);
-    if (enabled) {
-      ctx.save();
-      var lg = ctx.createLinearGradient(0, y, 0, y + h);
-      lg.addColorStop(0, 'rgba(255,255,255,0.45)');
-      lg.addColorStop(0.5, 'rgba(255,255,255,0.08)');
-      lg.addColorStop(1, 'rgba(0,0,0,0.12)');
-      rr(ctx, x, y, w, h, r);
-      ctx.fillStyle = lg;
-      ctx.fill();
-      ctx.restore();
-    }
-    txt(ctx, label, x + w / 2 + (labelDx || 0), y + h / 2 + 1, 18,
-      enabled ? (tone === 'blue' ? '#ffffff' : '#4a2f08') : 'rgba(242,234,216,0.4)', 'center', 600);
-    if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
-  }
+  return { header, drawnFan, seatPlate, seats, center, dealTable, hand, actions, chatEntry };
+};
+});
 
-  function clockChip(ctx, cx, cy, r, left, active) {
-    var leftN = Math.max(0, left || 0);
-    var warn = active && leftN <= 5;
-    var ring = warn ? '#d8412f' : '#e9b84d';
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = active ? '#fffaf0' : 'rgba(255,255,255,0.34)';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = ring;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.46, cy - r * 0.94, r * 0.19, 0, Math.PI * 2);
-    ctx.fillStyle = ring;
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(cx + r * 0.46, cy - r * 0.94, r * 0.19, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    txt(ctx, String(leftN), cx, cy + r * 0.3, Math.round(r * 0.92),
-      warn ? '#d8412f' : '#5a3a12', 'center', 700);
-  }
-
-  function btn(ctx, x, y, w, h, label, enabled, hits, act, primary) {
-    if (primary && enabled) {
-      box(ctx, x, y, w, h, 10, C.gold, null);
-      txt(ctx, label, x + w / 2, y + h / 2, 21, '#101f33', 'center', 600);
-    } else {
-      box(ctx, x, y, w, h, 10, enabled ? C.btn : 'rgba(16,28,46,0.6)',
-        enabled ? C.panelLine : 'rgba(216,179,106,0.12)');
-      txt(ctx, label, x + w / 2, y + h / 2, 21, enabled ? C.text : 'rgba(242,234,216,0.35)');
-    }
-    if (enabled) hits.push({ x: x, y: y, w: w, h: h, act: act });
-  }
-
-  // ---------- 进贡面板 ----------
-  function cardTxt(c) {
-    var r = c.r === 11 ? 'J' : c.r === 12 ? 'Q' : c.r === 13 ? 'K' : c.r === 14 ? 'A' : String(c.r);
-    return SUIT[c.s] + r;
-  }
+define("js/views/panels.js", function (require, module, exports) {
+// 各类弹层：进贡、结算、菜单、大厅、房间、聊天、工具抽屉、战绩、复盘、引导
+// 依赖 views/base.js（由 views.js 拆分而来，函数体保持原样）
+module.exports = function (B) {
+  // 同名接住上层导出，函数体保持原样
+  var state = B.state; // 共享可变状态，改的是 state 上的字段
+  var C = B.C;
+  var GUIDE_PAGES = B.GUIDE_PAGES;
+  var SEAT_NAMES = B.SEAT_NAMES;
+  var SUIT = B.SUIT;
+  var box = B.box;
+  var drawBack = B.drawBack;
+  var easeOut = B.easeOut;
+  var fxProgress = B.fxProgress;
+  var overlay = B.overlay;
+  var rankText = B.rankText;
+  var rr = B.rr;
+  var txt = B.txt;
 
   function tribute(ctx, S, L, hits) {
     var T = S.tribute;
@@ -3501,8 +3633,8 @@ define("js/views.js", function (require, module, exports) {
     var H = L.H;
 
     var barH = 44;
-    var barW = Math.min(W - 56, 700);
-    var barX = (W - barW) / 2;
+    var barW = Math.min(state.W - 56, 700);
+    var barX = (state.W - barW) / 2;
     var barY = L.hand.y - 56;
 
     // 底部状态条（不遮挡牌桌中央）
@@ -3555,7 +3687,7 @@ define("js/views.js", function (require, module, exports) {
     // 最近一条公示：谁被抽走了什么，所有人都能看到
     var lastLog = (T.log || []).slice(-1)[0];
     if (lastLog) {
-      txt(ctx, lastLog.text, W / 2, barY - 15, 12.5,
+      txt(ctx, lastLog.text, state.W / 2, barY - 15, 12.5,
         lastLog.kind === 'warn' ? '#f3b7b2' : C.dim, 'center');
     }
 
@@ -3566,7 +3698,7 @@ define("js/views.js", function (require, module, exports) {
       rows.forEach(function (r) { if (r.n > nMax) nMax = r.n; });
       var gp2 = 6;
       var maxPw = rows.length >= 3 ? 38 : (rows.length === 2 ? 42 : 46);
-      var fitPw = Math.floor((Math.min(W - 120, 680) - (nMax - 1) * gp2) / nMax);
+      var fitPw = Math.floor((Math.min(state.W - 120, 680) - (nMax - 1) * gp2) / nMax);
       var pw = Math.max(16, Math.min(maxPw, fitPw));
       var phh = Math.round(pw * 1.4);
       var rowGap = rows.length >= 3 ? 12 : 22;
@@ -3583,7 +3715,7 @@ define("js/views.js", function (require, module, exports) {
       rows.forEach(function (row, ri) {
         var n = Math.max(1, row.n);
         var totalW = n * pw + (n - 1) * gp2;
-        var sx = Math.max(104, (W - totalW) / 2);
+        var sx = Math.max(104, (state.W - totalW) / 2);
         var sy = top + ri * (phh + rowGap);
         var capped = loneDraw && row.cap != null;
         var gotN = row.got || 0;
@@ -3605,13 +3737,8 @@ define("js/views.js", function (require, module, exports) {
       });
 
       var doneTxt = '已抽 ' + (T.pull.done || 0) + ' / ' + (T.pull.total || 0) + ' 张';
-      txt(ctx, doneTxt, W / 2, top + blockH + 18, 12.5, C.dim, 'center');
+      txt(ctx, doneTxt, state.W / 2, top + blockH + 18, 12.5, C.dim, 'center');
     }
-  }
-  // ---------- 结算 ----------
-  function overlay(ctx, H, w, h) {
-    ctx.fillStyle = 'rgba(5,10,18,0.72)';
-    ctx.fillRect(0, 0, W, H);
   }
 
   function settle(ctx, S, L, hits) {
@@ -3624,25 +3751,25 @@ define("js/views.js", function (require, module, exports) {
       ctx.globalAlpha = e;
       ctx.translate(0, 22 * (1 - e));
     }
-    overlay(ctx, H, W, H);
+    overlay(ctx, H, state.W, H);
 
     var pw = 660, ph = 520;
-    var px = (W - pw) / 2, py = (H - ph) / 2 - 40;
+    var px = (state.W - pw) / 2, py = (H - ph) / 2 - 40;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
     var title = res.camp.mode === 'lone' ? '本局：独食 1 打 3' : '本局：2 打 2';
-    txt(ctx, title, W / 2, py + 52, 26, C.gold, 'center', 600);
+    txt(ctx, title, state.W / 2, py + 52, 26, C.gold, 'center', 600);
     var sub = res.camp.mode === 'lone'
       ? '独食者 ' + SEAT_NAMES[res.camp.lone] + ' 拿第 ' + (res.ranks.indexOf(res.camp.lone) + 1) + ' 名'
       : '胜方名次 ' + res.winRanks.join('、');
-    txt(ctx, sub, W / 2, py + 84, 15, C.dim);
+    txt(ctx, sub, state.W / 2, py + 84, 15, C.dim);
     // 连胜 / 本局得失提示
     var myScore = res.scores[0] || 0;
     var streak = (S.stats && S.stats.streak) || 0;
     var line = (myScore > 0 ? '本局 +' + myScore + ' 分' : myScore < 0 ? '本局 ' + myScore + ' 分' : '本局 0 分');
     if (streak >= 2 && myScore > 0) line += ' · 已连胜 ' + streak + ' 局';
     else if (myScore > 0) line += ' · 开张了';
-    txt(ctx, line, W / 2, py + 110, 15, myScore > 0 ? C.gold : C.dim);
+    txt(ctx, line, state.W / 2, py + 110, 15, myScore > 0 ? C.gold : C.dim);
 
     // 连胜光效：连胜 ≥3 时标题两侧描一圈暖光
     if (streak >= 3 && myScore > 0) {
@@ -3684,9 +3811,9 @@ define("js/views.js", function (require, module, exports) {
 
     var isLast = S.round >= S.rounds;
     var bw = 200, bh = 58;
-    box(ctx, W / 2 - bw / 2, py + ph - 92, bw, bh, 10, C.gold, null);
-    txt(ctx, isLast ? '看总成绩' : '下一局', W / 2, py + ph - 63, 21, '#101f33', 'center', 600);
-    hits.push({ x: W / 2 - bw / 2, y: py + ph - 92, w: bw, h: bh, act: 'next' });
+    box(ctx, state.W / 2 - bw / 2, py + ph - 92, bw, bh, 10, C.gold, null);
+    txt(ctx, isLast ? '看总成绩' : '下一局', state.W / 2, py + ph - 63, 21, '#101f33', 'center', 600);
+    hits.push({ x: state.W / 2 - bw / 2, y: py + ph - 92, w: bw, h: bh, act: 'next' });
 
     // 分享战绩 / 复盘（并排两个次级按钮）
     box(ctx, px + 40, py + ph - 84, 120, 44, 10, C.btn, C.panelLine);
@@ -3706,12 +3833,12 @@ define("js/views.js", function (require, module, exports) {
     var land = L.landscape;
 
     // 横屏按 750 高设计，主内容宽度用屏宽的 55%，避免超大屏上字太小
-    var cw = land ? Math.max(700, Math.min(1040, W * 0.6)) : Math.min(640, W - 56);
-    var cx = (W - cw) / 2;
+    var cw = land ? Math.max(700, Math.min(1040, state.W * 0.6)) : Math.min(640, state.W - 56);
+    var cx = (state.W - cw) / 2;
 
     var ty = land ? 72 : 150;
-    txt(ctx, '十三张 · 独食', W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
-    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
+    txt(ctx, '十三张 · 独食', state.W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
+    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', state.W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
 
     var lines = [
       '♦4 起手，第一手必须带 ♦4',
@@ -3750,67 +3877,67 @@ define("js/views.js", function (require, module, exports) {
     var by = sy + chipH + (land ? 22 : 24);
     var bw = land ? Math.min(cw * 0.56, 620) : Math.min(cw, 420);
     var bh = land ? 86 : 74;
-    box(ctx, (W - bw) / 2, by, bw, bh, 14, C.gold, null);
-    txt(ctx, '开始游戏', W / 2, by + bh / 2 + 1, land ? 34 : 24, '#101f33', 'center', 700);
-    hits.push({ x: (W - bw) / 2, y: by, w: bw, h: bh, act: 'startGame' });
+    box(ctx, (state.W - bw) / 2, by, bw, bh, 14, C.gold, null);
+    txt(ctx, '开始游戏', state.W / 2, by + bh / 2 + 1, land ? 34 : 24, '#101f33', 'center', 700);
+    hits.push({ x: (state.W - bw) / 2, y: by, w: bw, h: bh, act: 'startGame' });
 
     var ny = by + bh + (land ? 16 : 14);
     var nh = land ? 64 : 58;
-    box(ctx, (W - bw) / 2, ny, bw, nh, 12, C.btn, C.panelLine);
-    txt(ctx, '联机对战', W / 2, ny + nh / 2 + 1, land ? 24 : 19, C.text, 'center', 600);
-    hits.push({ x: (W - bw) / 2, y: ny, w: bw, h: nh, act: 'netOpen' });
+    box(ctx, (state.W - bw) / 2, ny, bw, nh, 12, C.btn, C.panelLine);
+    txt(ctx, '联机对战', state.W / 2, ny + nh / 2 + 1, land ? 24 : 19, C.text, 'center', 600);
+    hits.push({ x: (state.W - bw) / 2, y: ny, w: bw, h: nh, act: 'netOpen' });
 
-    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', W / 2, Math.min(ny + nh + (land ? 34 : 36), H - 18), land ? 17 : 13, C.dim);
+    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', state.W / 2, Math.min(ny + nh + (land ? 34 : 36), H - 18), land ? 17 : 13, C.dim);
   }
 
   function summary(ctx, S, L, hits) {
     var H = L.H;
-    overlay(ctx, H, W, H);
+    overlay(ctx, H, state.W, H);
     var pw = 600, ph = 460;
-    var px = (W - pw) / 2, py = (H - ph) / 2;
+    var px = (state.W - pw) / 2, py = (H - ph) / 2;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
-    txt(ctx, '全场结束 · ' + S.rounds + ' 局', W / 2, py + 56, 26, C.gold, 'center', 600);
+    txt(ctx, '全场结束 · ' + S.rounds + ' 局', state.W / 2, py + 56, 26, C.gold, 'center', 600);
     S.scores.forEach(function (s, i) {
       var y = py + 120 + i * 46;
       txt(ctx, SEAT_NAMES[i], px + 90, y, 19, C.text, 'left');
       txt(ctx, (s > 0 ? '+' : '') + s, px + pw - 90, y, 19, s > 0 ? C.gold : s < 0 ? '#d99a98' : C.dim, 'right');
     });
     var bw = 260, bh = 58;
-    box(ctx, W / 2 - bw / 2, py + ph - 88, bw, bh, 10, C.gold, null);
-    txt(ctx, '再来一场', W / 2, py + ph - 59, 20, '#101f33', 'center', 600);
-    hits.push({ x: W / 2 - bw / 2, y: py + ph - 88, w: bw, h: bh, act: 'newMatch' });
+    box(ctx, state.W / 2 - bw / 2, py + ph - 88, bw, bh, 10, C.gold, null);
+    txt(ctx, '再来一场', state.W / 2, py + ph - 59, 20, '#101f33', 'center', 600);
+    hits.push({ x: state.W / 2 - bw / 2, y: py + ph - 88, w: bw, h: bh, act: 'newMatch' });
 
-    box(ctx, W / 2 - bw / 2, py + ph - 22, bw, 42, 10, C.btn, C.panelLine);
-    txt(ctx, '回到开始界面', W / 2, py + ph - 1, 16, C.text, 'center');
-    hits.push({ x: W / 2 - bw / 2, y: py + ph - 22, w: bw, h: 42, act: 'toMenu' });
+    box(ctx, state.W / 2 - bw / 2, py + ph - 22, bw, 42, 10, C.btn, C.panelLine);
+    txt(ctx, '回到开始界面', state.W / 2, py + ph - 1, 16, C.text, 'center');
+    hits.push({ x: state.W / 2 - bw / 2, y: py + ph - 22, w: bw, h: 42, act: 'toMenu' });
   }
 
   // ---------- 测试模式小面板（页头「测试」入口） ----------
   function testPanel(ctx, S, L, hits) {
-    overlay(ctx, L.H, W, L.H);
+    overlay(ctx, L.H, state.W, L.H);
     var pw = 520, ph = 296;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2;
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2;
     if (py < 8) py = 8;
-    if (px < 8) px = (W - pw) / 2;
+    if (px < 8) px = (state.W - pw) / 2;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '测试模式', W / 2, py + 34, 20, C.gold, 'center', 600);
-    txt(ctx, '主视角固定 4×3 / 4×A / 4×2 + ♦4', W / 2, py + 60, 14, C.dim, 'center');
+    txt(ctx, '测试模式', state.W / 2, py + 34, 20, C.gold, 'center', 600);
+    txt(ctx, '主视角固定 4×3 / 4×A / 4×2 + ♦4', state.W / 2, py + 60, 14, C.dim, 'center');
 
     var bw = pw - 56, bh = 52;
-    var bx = W / 2 - bw / 2, by = py + 84;
+    var bx = state.W / 2 - bw / 2, by = py + 84;
     box(ctx, bx, by, bw, bh, 10, C.gold, null);
-    txt(ctx, '特殊牌开局（4×3 / 4×A / 4×2 + ♦4）', W / 2, by + bh / 2, 17, '#101f33', 'center', 600);
+    txt(ctx, '特殊牌开局（4×3 / 4×A / 4×2 + ♦4）', state.W / 2, by + bh / 2, 17, '#101f33', 'center', 600);
     hits.push({ x: bx, y: by, w: bw, h: bh, act: 'testHand' });
 
     by += bh + 12;
     box(ctx, bx, by, bw, bh, 10, C.btn, C.panelLine);
-    txt(ctx, '进贡流程演示', W / 2, by + bh / 2, 17, C.text, 'center');
+    txt(ctx, '进贡流程演示', state.W / 2, by + bh / 2, 17, C.text, 'center');
     hits.push({ x: bx, y: by, w: bw, h: bh, act: 'testTribute' });
 
     by += bh + 12;
     box(ctx, bx, by, bw, 44, 10, C.btn, C.panelLine);
-    txt(ctx, '关闭', W / 2, by + 22, 16, C.text, 'center');
+    txt(ctx, '关闭', state.W / 2, by + 22, 16, C.text, 'center');
     hits.push({ x: bx, y: by, w: bw, h: 44, act: 'testMenu' });
   }
 
@@ -3818,52 +3945,52 @@ define("js/views.js", function (require, module, exports) {
     var w = 420, h = 54;
     // 横屏牌桌带太矮，提示条放到手牌上方（不压出牌区）
     var y0 = L.seats.south.y - 66;
-    box(ctx, W / 2 - w / 2, y0, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
-    txt(ctx, S.toast, W / 2, y0 + 27, 17, C.text);
+    box(ctx, state.W / 2 - w / 2, y0, w, h, 10, 'rgba(10,20,34,0.9)', C.panelLine);
+    txt(ctx, S.toast, state.W / 2, y0 + 27, 17, C.text);
   }
 
   // ---------- 联机：大厅 / 房号键盘 / 房间等待 ----------
   function lobbyPanel(ctx, S, L, hits) {
     var H = L.H;
-    overlay(ctx, H, W, H);
+    overlay(ctx, H, state.W, H);
     var pw = 660, ph = S.lobby.kind === 'keypad' ? 660 : S.lobby.kind === 'config' ? 340 : 500;
-    var px = (W - pw) / 2, py = (H - ph) / 2 - ((W / H) >= 1.2 ? 20 : 0);
+    var px = (state.W - pw) / 2, py = (H - ph) / 2 - ((state.W / H) >= 1.2 ? 20 : 0);
     if (py < 8) py = 8;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
     if (S.lobby.kind === 'entry') {
-      txt(ctx, '联机对战', W / 2, py + 56, 28, C.gold, 'center', 600);
-      txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', W / 2, py + 88, 14, C.dim);
+      txt(ctx, '联机对战', state.W / 2, py + 56, 28, C.gold, 'center', 600);
+      txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', state.W / 2, py + 88, 14, C.dim);
       var srv = String(S.lobby.url || '');
       var srvW = Math.min(pw - 80, Math.max(240, (srv.length + 3) * 7.4));
-      var srvX = (W - srvW) / 2;
+      var srvX = (state.W - srvW) / 2;
       box(ctx, srvX, py + 100, srvW, 32, 16, C.btn, C.panelLine);
-      txt(ctx, '服务器 ' + srv, W / 2, py + 121, 12.5, C.gold, 'center');
+      txt(ctx, '服务器 ' + srv, state.W / 2, py + 121, 12.5, C.gold, 'center');
       hits.push({ x: srvX, y: py + 100, w: srvW, h: 32, act: 'netServer' });
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
-      txt(ctx, '创建房间', W / 2, by + 41, 24, '#101f33', 'center', 600);
+      txt(ctx, '创建房间', state.W / 2, by + 41, 24, '#101f33', 'center', 600);
       hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netConfig' });
 
       by += 96;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.btn, C.panelLine);
-      txt(ctx, '加入房间', W / 2, by + 41, 22, C.text, 'center', 600);
+      txt(ctx, '加入房间', state.W / 2, by + 41, 22, C.text, 'center', 600);
       hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netKeypad' });
 
       by += 104;
-      txt(ctx, S.lobby.err || S.netStatus || '', W / 2, by, 15,
+      txt(ctx, S.lobby.err || S.netStatus || '', state.W / 2, by, 15,
         S.lobby.err ? '#e8b0ae' : C.dim);
 
       box(ctx, px + 150, py + ph - 92, pw - 300, 58, 10, C.btn, C.panelLine);
-      txt(ctx, '返回单机', W / 2, py + ph - 63, 18, C.text, 'center');
+      txt(ctx, '返回单机', state.W / 2, py + ph - 63, 18, C.text, 'center');
       hits.push({ x: px + 150, y: py + ph - 92, w: pw - 300, h: 58, act: 'netBack' });
       return;
     }
 
     if (S.lobby.kind === 'config') {
       var RC = S.roomCfg || {};
-      txt(ctx, '创建房间 · 房间设置', W / 2, py + 34, 22, C.gold, 'center', 600);
+      txt(ctx, '创建房间 · 房间设置', state.W / 2, py + 34, 22, C.gold, 'center', 600);
 
       function chipRow(rowY, label, opts) {
         txt(ctx, label, px + 44, rowY + 10, 15, C.dim, 'left');
@@ -3897,8 +4024,8 @@ define("js/views.js", function (require, module, exports) {
         { w: 84, label: '常显', key: 'hint', v: 'always', on: RC.teamHint === 'always' }
       ]);
 
-      if (S.lobby.err) txt(ctx, S.lobby.err, W / 2, py + 258, 12, '#e8b0ae', 'center');
-      else txt(ctx, '局数与规则由房主设定 · 纯积分娱乐，无充值无兑换', W / 2, py + 258, 12, C.dim, 'center');
+      if (S.lobby.err) txt(ctx, S.lobby.err, state.W / 2, py + 258, 12, '#e8b0ae', 'center');
+      else txt(ctx, '局数与规则由房主设定 · 纯积分娱乐，无充值无兑换', state.W / 2, py + 258, 12, C.dim, 'center');
 
       var cy2 = py + ph - 58;
       box(ctx, px + 40, cy2, 200, 42, 10, C.gold, null);
@@ -3918,12 +4045,12 @@ define("js/views.js", function (require, module, exports) {
     }
 
     // 房号键盘
-    txt(ctx, '输入房间号', W / 2, py + 44, 24, C.gold, 'center', 600);
+    txt(ctx, '输入房间号', state.W / 2, py + 44, 24, C.gold, 'center', 600);
     var code = S.lobby.code || '';
     var digits = (code + '____').slice(0, 4).split('');
     var cw = 64, gapd = 14;
     var totalW = 4 * cw + 3 * gapd;
-    var cx0 = W / 2 - totalW / 2;
+    var cx0 = state.W / 2 - totalW / 2;
     digits.forEach(function (d, i) {
       var x = cx0 + i * (cw + gapd);
       box(ctx, x, py + 70, cw, 68, 10, 'rgba(10,20,34,0.7)', 'rgba(216,179,106,0.3)');
@@ -3932,7 +4059,7 @@ define("js/views.js", function (require, module, exports) {
 
     var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '退', '0', '进'];
     var kw = 148, kh = 66, kgx = 20, kgy = 10;
-    var kx0 = W / 2 - (3 * kw + 2 * kgx) / 2;
+    var kx0 = state.W / 2 - (3 * kw + 2 * kgx) / 2;
     keys.forEach(function (k, i) {
       var cx = kx0 + (i % 3) * (kw + kgx);
       var cy = py + 154 + Math.floor(i / 3) * (kh + kgy);
@@ -3945,27 +4072,27 @@ define("js/views.js", function (require, module, exports) {
     });
 
     box(ctx, kx0, py + ph - 62, 3 * kw + 2 * kgx, 46, 10, C.btn, C.panelLine);
-    txt(ctx, '取消', W / 2, py + ph - 39, 17, C.text, 'center');
+    txt(ctx, '取消', state.W / 2, py + ph - 39, 17, C.text, 'center');
     hits.push({ x: kx0, y: py + ph - 62, w: 3 * kw + 2 * kgx, h: 46, act: 'netCancel' });
   }
 
   function roomPanel(ctx, S, L, hits) {
     var H = L.H;
-    overlay(ctx, H, W, H);
+    overlay(ctx, H, state.W, H);
     var pw = 660, ph = 660;
-    var px = (W - pw) / 2, py = (H - ph) / 2;
+    var px = (state.W - pw) / 2, py = (H - ph) / 2;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
-    txt(ctx, '房间号', W / 2, py + 46, 16, C.dim, 'center');
-    txt(ctx, String(S.room || ''), W / 2, py + 96, 44, C.gold, 'center', 600);
-    txt(ctx, '把房号发给朋友，或用链接 ?room=房号 进入', W / 2, py + 132, 14, C.dim);
+    txt(ctx, '房间号', state.W / 2, py + 46, 16, C.dim, 'center');
+    txt(ctx, String(S.room || ''), state.W / 2, py + 96, 44, C.gold, 'center', 600);
+    txt(ctx, '把房号发给朋友，或用链接 ?room=房号 进入', state.W / 2, py + 132, 14, C.dim);
 
     var RC2 = S.roomCfg || {};
     var tierTxt = { heavy: '重贡 4/2', light: '轻贡 2/1', off: '不进贡' };
     var hintTxt = { none: '不提示', reveal: '出牌后提示', always: '常显' };
     txt(ctx, (S.rounds || 8) + ' 局 · ' + (tierTxt[RC2.tributeTier] || '重贡') +
       ' · 每步 ' + (RC2.turnSeconds || 20) + ' 秒 · 队友' + (hintTxt[RC2.teamHint] || '不提示'),
-      W / 2, py + 154, 13, C.gold, 'center');
+      state.W / 2, py + 154, 13, C.gold, 'center');
 
     (S.seats || []).forEach(function (s, i) {
       var y = py + 178 + i * 56;
@@ -3981,38 +4108,38 @@ define("js/views.js", function (require, module, exports) {
     // 昵称 / 发言：头像行下方一排放两个胶囊，朋友圈式操作，不挤占席位列表
     var nick = S.myName || '玩家';
     var chipW = 200, chipH = 44, chipY = py + 412;
-    var cx0 = W / 2 - chipW - 10;
+    var cx0 = state.W / 2 - chipW - 10;
     box(ctx, cx0, chipY, chipW, chipH, 22, C.btn, C.panelLine);
     txt(ctx, '改名 · ' + nick, cx0 + chipW / 2, chipY + chipH / 2, 15, C.text, 'center');
     hits.push({ x: cx0, y: chipY, w: chipW, h: chipH, act: 'netRename' });
-    var cx1 = W / 2 + 10;
+    var cx1 = state.W / 2 + 10;
     box(ctx, cx1, chipY, chipW, chipH, 22, C.btn, C.panelLine);
     txt(ctx, '发言', cx1 + chipW / 2, chipY + chipH / 2, 15, C.text, 'center');
     hits.push({ x: cx1, y: chipY, w: chipW, h: chipH, act: 'chatOpen' });
 
     var y2 = py + ph - 168;
     if (S.isHost) {
-      box(ctx, W / 2 - bw / 2, y2, bw, bh, 10, C.gold, null);
-      txt(ctx, '开始（空位补机器人）', W / 2, y2 + 33, 18, '#101f33', 'center', 600);
-      hits.push({ x: W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netStart' });
+      box(ctx, state.W / 2 - bw / 2, y2, bw, bh, 10, C.gold, null);
+      txt(ctx, '开始（空位补机器人）', state.W / 2, y2 + 33, 18, '#101f33', 'center', 600);
+      hits.push({ x: state.W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netStart' });
     } else {
-      box(ctx, W / 2 - bw / 2, y2, bw, bh, 10, C.btn, C.panelLine);
-      txt(ctx, S.myReady ? '取消准备' : '准备', W / 2, y2 + 33, 19, C.text, 'center', 600);
-      hits.push({ x: W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netReady' });
+      box(ctx, state.W / 2 - bw / 2, y2, bw, bh, 10, C.btn, C.panelLine);
+      txt(ctx, S.myReady ? '取消准备' : '准备', state.W / 2, y2 + 33, 19, C.text, 'center', 600);
+      hits.push({ x: state.W / 2 - bw / 2, y: y2, w: bw, h: bh, act: 'netReady' });
     }
 
     if (S.isHost) {
       var lw = 220, lg = 14;
-      box(ctx, W / 2 - lw - lg / 2, y2 + 78, lw, 52, 10, 'rgba(140,47,42,0.9)', 'rgba(255,210,180,0.5)');
-      txt(ctx, '解散房间', W / 2 - lg / 2 - lw / 2, y2 + 78 + 27, 16, '#ffe9dd', 'center', 600);
-      hits.push({ x: W / 2 - lw - lg / 2, y: y2 + 78, w: lw, h: 52, act: 'dissolveWait' });
-      box(ctx, W / 2 + lg / 2, y2 + 78, lw, 52, 10, C.btn, C.panelLine);
-      txt(ctx, '离开房间', W / 2 + lg / 2 + lw / 2, y2 + 78 + 27, 16, C.text, 'center');
-      hits.push({ x: W / 2 + lg / 2, y: y2 + 78, w: lw, h: 52, act: 'netLeave' });
+      box(ctx, state.W / 2 - lw - lg / 2, y2 + 78, lw, 52, 10, 'rgba(140,47,42,0.9)', 'rgba(255,210,180,0.5)');
+      txt(ctx, '解散房间', state.W / 2 - lg / 2 - lw / 2, y2 + 78 + 27, 16, '#ffe9dd', 'center', 600);
+      hits.push({ x: state.W / 2 - lw - lg / 2, y: y2 + 78, w: lw, h: 52, act: 'dissolveWait' });
+      box(ctx, state.W / 2 + lg / 2, y2 + 78, lw, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', state.W / 2 + lg / 2 + lw / 2, y2 + 78 + 27, 16, C.text, 'center');
+      hits.push({ x: state.W / 2 + lg / 2, y: y2 + 78, w: lw, h: 52, act: 'netLeave' });
     } else {
-      box(ctx, W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
-      txt(ctx, '离开房间', W / 2, y2 + 78 + 27, 17, C.text, 'center');
-      hits.push({ x: W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
+      box(ctx, state.W / 2 - 110, y2 + 78, 220, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '离开房间', state.W / 2, y2 + 78 + 27, 17, C.text, 'center');
+      hits.push({ x: state.W / 2 - 110, y: y2 + 78, w: 220, h: 52, act: 'netLeave' });
     }
   }
 
@@ -4025,16 +4152,16 @@ define("js/views.js", function (require, module, exports) {
 
   function chatPanel(ctx, S, L, hits) {
     var H = L.H;
-    overlay(ctx, H, W, H);
+    overlay(ctx, H, state.W, H);
     var pw = 640, ph = 668;
-    var px = (W - pw) / 2, py = Math.max(16, (H - ph) / 2);
+    var px = (state.W - pw) / 2, py = Math.max(16, (H - ph) / 2);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '发言', W / 2, py + 40, 22, C.gold, 'center', 600);
+    txt(ctx, '发言', state.W / 2, py + 40, 22, C.gold, 'center', 600);
 
     // 最近 5 条
     var msgs = (S.chats || []).slice(-5);
     if (!msgs.length) {
-      txt(ctx, '还没人说话，点下面的表情、短语或「打字」发一句', W / 2, py + 100, 14, C.dim);
+      txt(ctx, '还没人说话，点下面的表情、短语或「打字」发一句', state.W / 2, py + 100, 14, C.dim);
     } else {
       msgs.forEach(function (c, i) {
         var y = py + 80 + i * 23;
@@ -4062,19 +4189,19 @@ define("js/views.js", function (require, module, exports) {
 
     // 短语：2×4
     var phs = (S.chatPhrases || []);
-    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 366;
+    var bw2 = 280, bh2 = 42, gx1 = state.W / 2 - bw2 - 10, gy1 = py + 366;
     phs.slice(0, 8).forEach(function (p, i) {
       var c = i % 2, r = Math.floor(i / 2);
-      var x = c ? W / 2 + 10 : gx1, y = gy1 + r * 50;
+      var x = c ? state.W / 2 + 10 : gx1, y = gy1 + r * 50;
       box(ctx, x, y, bw2, bh2, 12, C.btn, C.panelLine);
       txt(ctx, p, x + bw2 / 2, y + bh2 / 2, 15, C.text, 'center');
       hits.push({ x: x, y: y, w: bw2, h: bh2, act: 'chatText', text: p });
     });
 
     // 关闭
-    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '关闭', W / 2, py + ph - 37, 16, C.text, 'center', 600);
-    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'chatClose' });
+    box(ctx, state.W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', state.W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: state.W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'chatClose' });
   }
 
   // 牌桌上冒出的最近发言（8 秒内、最多 3 条），从手牌左侧向上堆
@@ -4095,7 +4222,6 @@ define("js/views.js", function (require, module, exports) {
       txt(ctx, txtS, x + 12, y + 14, c.kind === 'emoji' ? 16 : 13, C.text, 'left');
     });
   }
-
 
   // ---------- 记牌器 ----------
   // 已知牌＝我的手牌＋桌上已出的牌；52 张减去这些即各点数剩余张数
@@ -4125,7 +4251,7 @@ define("js/views.js", function (require, module, exports) {
     var left = remainByRank(S);
     var cw = 46, ch = 42, gap = 2;
     var totalW = order.length * cw + (order.length - 1) * gap;
-    var x0 = Math.round((W - totalW) / 2);
+    var x0 = Math.round((state.W - totalW) / 2);
     var y = L.hand.y + L.hand.cardH + 6;
     if (y + ch > L.H - 2) y = L.H - ch - 2;
     ctx.save();
@@ -4152,13 +4278,13 @@ define("js/views.js", function (require, module, exports) {
   function toolsDrawer(ctx, S, L, hits) {
     if (!S.toolsOpen) return;
     var pw = 620, ph = 540;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
-    overlay(ctx, L.H, W, pw);
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2 - 20;
+    overlay(ctx, L.H, state.W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '辅助工具', W / 2, py + 46, 22, C.gold, 'center', 600);
+    txt(ctx, '辅助工具', state.W / 2, py + 46, 22, C.gold, 'center', 600);
     var st = S.stats || {};
     txt(ctx, '战绩 ' + (st.wins || 0) + ' 胜 · 连胜 ' + (st.streak || 0),
-      W / 2, py + 74, 14, C.dim, 'center');
+      state.W / 2, py + 74, 14, C.dim, 'center');
 
     var cw = (pw - 48 - 16) / 2, ch = 74;
     var gx = px + 24, gy = py + 96;
@@ -4178,9 +4304,9 @@ define("js/views.js", function (require, module, exports) {
         it.label, it.sub, !!it.on, it.act, hits, it.tone);
     });
 
-    box(ctx, W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '关闭', W / 2, py + ph - 39, 16, C.text, 'center', 600);
-    hits.push({ x: W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'toolsClose' });
+    box(ctx, state.W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', state.W / 2, py + ph - 39, 16, C.text, 'center', 600);
+    hits.push({ x: state.W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'toolsClose' });
   }
 
   // ---------- 战绩 ----------
@@ -4188,10 +4314,10 @@ define("js/views.js", function (require, module, exports) {
     if (!S.statsOpen) return;
     var st = S.stats || {};
     var pw = 640, ph = 580;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
-    overlay(ctx, L.H, W, pw);
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, state.W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '我的战绩', W / 2, py + 48, 22, C.gold, 'center', 600);
+    txt(ctx, '我的战绩', state.W / 2, py + 48, 22, C.gold, 'center', 600);
 
     var cells = [
       { k: '场次', v: st.games || 0 },
@@ -4208,7 +4334,7 @@ define("js/views.js", function (require, module, exports) {
     });
     txt(ctx, '最佳单局 ' + (st.best || 0) + ' 分 · 共 ' + (st.games || 0) + ' 局（' +
       (st.wins || 0) + ' 胜 ' + (st.losses || 0) + ' 负 ' + (st.draws || 0) + ' 平）',
-      W / 2, py + 176, 14, C.dim, 'center');
+      state.W / 2, py + 176, 14, C.dim, 'center');
 
     var cw2 = (pw - 48 - 16) / 2;
     var lx = px + 24, rx = px + 24 + cw2 + 16;
@@ -4240,9 +4366,9 @@ define("js/views.js", function (require, module, exports) {
         rx + cw2 - 14, y + 19, 12, C.dim, 'right');
     });
 
-    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '关闭', W / 2, py + ph - 37, 16, C.text, 'center', 600);
-    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'statsClose' });
+    box(ctx, state.W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', state.W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: state.W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'statsClose' });
   }
 
   // ---------- 复盘 ----------
@@ -4250,13 +4376,13 @@ define("js/views.js", function (require, module, exports) {
     if (!S.replayOpen) return;
     var rows = (S.replay || []);
     var pw = 640, ph = 600;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
-    overlay(ctx, L.H, W, pw);
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, state.W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '上一局复盘', W / 2, py + 46, 22, C.gold, 'center', 600);
-    txt(ctx, '按出牌顺序记录（过牌也记）', W / 2, py + 72, 13, C.dim, 'center');
+    txt(ctx, '上一局复盘', state.W / 2, py + 46, 22, C.gold, 'center', 600);
+    txt(ctx, '按出牌顺序记录（过牌也记）', state.W / 2, py + 72, 13, C.dim, 'center');
     if (!rows.length) {
-      txt(ctx, '这局还没有出牌记录', W / 2, py + 200, 16, C.dim, 'center');
+      txt(ctx, '这局还没有出牌记录', state.W / 2, py + 200, 16, C.dim, 'center');
     }
     var show = rows.slice(-11);
     show.forEach(function (r, i) {
@@ -4266,9 +4392,9 @@ define("js/views.js", function (require, module, exports) {
       var body = r.pass ? '过牌' : cardLine(r.cards || []);
       txt(ctx, body, px + 140, y + 18, 14, r.pass ? C.dim : C.text, 'left');
     });
-    box(ctx, W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '关闭', W / 2, py + ph - 39, 16, C.text, 'center', 600);
-    hits.push({ x: W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'replayClose' });
+    box(ctx, state.W / 2 - 110, py + ph - 62, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '关闭', state.W / 2, py + ph - 39, 16, C.text, 'center', 600);
+    hits.push({ x: state.W / 2 - 110, y: py + ph - 62, w: 220, h: 46, act: 'replayClose' });
   }
 
   function cardLine(cards) {
@@ -4276,47 +4402,16 @@ define("js/views.js", function (require, module, exports) {
     return cards.length > 6 ? s + ' …(' + cards.length + ' 张)' : s;
   }
 
-  // ---------- 新手引导 ----------
-  var GUIDE_PAGES = [
-    {
-      t: '一、认牌与大小',
-      lines: [
-        '整副 52 张、四家各 13 张，没有大小王。',
-        '点数 3 最大、4 最小：3 > 2 > A > K > … > 5 > 4。',
-        '同点数比花色：♠ > ♥ > ♣ > ♦。',
-        '♦4 是起手牌：每局第一手必须带 ♦4。'
-      ]
-    },
-    {
-      t: '二、牌型与出牌',
-      lines: [
-        '单张、对子、三个、顺子（≥5 张连续）、同花顺、葫芦。',
-        '对子/三个比「其中较大那张」的点数与花色。',
-        '顺子按最大张比；同花顺比顺子大。',
-        '压不过就「不出」，四家都过则由上家重新起手。'
-      ]
-    },
-    {
-      t: '三、朋友与独食',
-      lines: [
-        '♠3 与 ♠A 同持 ＝ 独食，1 打 3，两家都赢你就算你输。',
-        '不独食就按身份牌分两队：持 ♠3 与持 ♠A 的两人是朋友。',
-        '名次：先出完 1、2、3、4，按名次计分并决定进贡。',
-        '下一局：输家给赢家进贡（重贡 4/2，轻贡 2/1）。'
-      ]
-    }
-  ];
-
   function guidePanel(ctx, S, L, hits) {
     if (!S.guideOpen) return;
     var page = Math.max(0, Math.min(2, S.guidePage || 0));
     var G = GUIDE_PAGES[page];
     var pw = 640, ph = 520;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 30;
-    overlay(ctx, L.H, W, pw);
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2 - 30;
+    overlay(ctx, L.H, state.W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.gold);
-    txt(ctx, '新手引导 ' + (page + 1) + '/3', W / 2, py + 44, 15, C.dim, 'center');
-    txt(ctx, G.t, W / 2, py + 82, 24, C.gold, 'center', 700);
+    txt(ctx, '新手引导 ' + (page + 1) + '/3', state.W / 2, py + 44, 15, C.dim, 'center');
+    txt(ctx, G.t, state.W / 2, py + 82, 24, C.gold, 'center', 700);
     G.lines.forEach(function (ln, i) {
       var y = py + 130 + i * 52;
       box(ctx, px + 34, y - 24, 24, 24, 6, 'rgba(216,179,106,0.18)', C.panelLine);
@@ -4339,19 +4434,18 @@ define("js/views.js", function (require, module, exports) {
     hits.push({ x: px + pw / 2 - 30, y: py + ph - 62, w: 80, h: 46, act: 'guideClose' });
   }
 
-
   // ---------- 对局内菜单 ----------
   function pausePanel(ctx, S, L, hits) {
     if (!S.pauseOpen) return;
     var pw = 640, ph = L.landscape ? 600 : 640;
-    var px = (W - pw) / 2, py = (L.H - ph) / 2 - 20;
-    overlay(ctx, L.H, W, pw);
+    var px = (state.W - pw) / 2, py = (L.H - ph) / 2 - 20;
+    overlay(ctx, L.H, state.W, pw);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '对局菜单', W / 2, py + 46, 22, C.gold, 'center', 600);
+    txt(ctx, '对局菜单', state.W / 2, py + 46, 22, C.gold, 'center', 600);
     var st = S.stats || {};
     txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '单机 · 三家 AI') +
       ' · 第 ' + Math.max(1, S.round) + '/' + S.rounds + ' 局 · 战绩 ' + (st.wins || 0) + ' 胜',
-      W / 2, py + 72, 13, C.dim, 'center');
+      state.W / 2, py + 72, 13, C.dim, 'center');
 
     var cw = (pw - 48 - 16) / 2, ch = 62;
     var gx = px + 24, gy = py + 92;
@@ -4377,46 +4471,91 @@ define("js/views.js", function (require, module, exports) {
         it.label, it.sub, !!it.on, it.act, hits, 0);
     });
 
-    box(ctx, W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '继续游戏', W / 2, py + ph - 37, 16, C.text, 'center', 600);
-    hits.push({ x: W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'pauseClose' });
+    box(ctx, state.W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
+    txt(ctx, '继续游戏', state.W / 2, py + ph - 37, 16, C.text, 'center', 600);
+    hits.push({ x: state.W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'pauseClose' });
   }
 
   // 二次确认弹窗：退出本局 / 解散房间
   function askPanel(ctx, S, L, hits) {
     if (!S.ask) return;
     var H = L.H, pw = 560, ph = 320;
-    var px = (W - pw) / 2, py = Math.max(12, (H - ph) / 2);
-    overlay(ctx, H, W, H);
+    var px = (state.W - pw) / 2, py = Math.max(12, (H - ph) / 2);
+    overlay(ctx, H, state.W, H);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     var ex = S.ask.kind === 'dissolve';
-    txt(ctx, ex ? '解散房间？' : '退出本局？', W / 2, py + 56, 24, C.gold, 'center', 600);
+    txt(ctx, ex ? '解散房间？' : '退出本局？', state.W / 2, py + 56, 24, C.gold, 'center', 600);
     var sub = ex
       ? '房间会关闭，四位玩家都回联机大厅'
       : (S.mode === 'online'
         ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
         : '本局进度不保存，回到主界面');
-    txt(ctx, sub, W / 2, py + 100, 14, C.dim, 'center');
+    txt(ctx, sub, state.W / 2, py + 100, 14, C.dim, 'center');
     if (S.mode === 'online' && !ex) {
-      txt(ctx, '有人在线时房间会继续', W / 2, py + 128, 13, C.dim, 'center');
+      txt(ctx, '有人在线时房间会继续', state.W / 2, py + 128, 13, C.dim, 'center');
     }
 
     var bw = 220, bh = 60, by = py + ph - 96;
-    box(ctx, W / 2 - bw - 10, by, bw, bh, 12, ex ? 'rgba(140,47,42,0.92)' : C.gold, null);
-    txt(ctx, ex ? '解散' : '退出', W / 2 - bw / 2 - 10, by + bh / 2, 18,
+    box(ctx, state.W / 2 - bw - 10, by, bw, bh, 12, ex ? 'rgba(140,47,42,0.92)' : C.gold, null);
+    txt(ctx, ex ? '解散' : '退出', state.W / 2 - bw / 2 - 10, by + bh / 2, 18,
       ex ? '#ffe9dd' : '#101f33', 'center', 600);
-    hits.push({ x: W / 2 - bw - 10, y: by, w: bw, h: bh, act: 'askYes' });
+    hits.push({ x: state.W / 2 - bw - 10, y: by, w: bw, h: bh, act: 'askYes' });
 
-    box(ctx, W / 2 + 10, by, bw, bh, 12, C.btn, C.panelLine);
-    txt(ctx, '取消', W / 2 + bw / 2 + 10, by + bh / 2, 18, C.text, 'center');
-    hits.push({ x: W / 2 + 10, y: by, w: bw, h: bh, act: 'askNo' });
+    box(ctx, state.W / 2 + 10, by, bw, bh, 12, C.btn, C.panelLine);
+    txt(ctx, '取消', state.W / 2 + bw / 2 + 10, by + bh / 2, 18, C.text, 'center');
+    hits.push({ x: state.W / 2 + 10, y: by, w: bw, h: bh, act: 'askNo' });
   }
 
+  return { tribute, settle, menu, summary, testPanel, toast, lobbyPanel, roomPanel, chatName, chatPanel, chatBubbles, remainByRank, recordStrip, toolButton, toolsDrawer, statsPanel, replayPanel, cardLine, guidePanel, pausePanel, askPanel };
+};
+});
+
+define("js/views.js", function (require, module, exports) {
+// 画布视图：把牌桌状态画到 canvas 上，同时产出可点击热区
+// 具体绘制拆在 views/base.js（原语与特效）、views/table.js（牌桌）、views/panels.js（弹层）
+(function () {
+  var B = require('./views/base.js')();
+  var T = require('./views/table.js')(B);
+  var P = require('./views/panels.js')(B);
+
+  // 同名接住三层导出，draw() 里的调用名保持不变
+  var C = B.C; // 导出用
+  var SEAT_NAMES = B.SEAT_NAMES; // 导出用
+  var actions = T.actions;
+  var askPanel = P.askPanel;
+  var bg = B.bg;
+  var box = B.box;
+  var center = T.center;
+  var chatBubbles = P.chatBubbles;
+  var chatEntry = T.chatEntry;
+  var chatPanel = P.chatPanel;
+  var fxOverlay = B.fxOverlay;
+  var fxShake = B.fxShake;
+  var guidePanel = P.guidePanel;
+  var hand = T.hand;
+  var header = T.header;
+  var layout = B.layout;
+  var lobbyPanel = P.lobbyPanel;
+  var menu = P.menu;
+  var pausePanel = P.pausePanel;
+  var recordStrip = P.recordStrip;
+  var replayPanel = P.replayPanel;
+  var roomPanel = P.roomPanel;
+  var seats = T.seats;
+  var settle = P.settle;
+  var state = B.state;
+  var statsPanel = P.statsPanel;
+  var summary = P.summary;
+  var testPanel = P.testPanel;
+  var toast = P.toast;
+  var toolsDrawer = P.toolsDrawer;
+  var tribute = P.tribute;
+  var txt = B.txt;
 
   function draw(ctx, S, H, wW) {
-    if (wW) W = wW;
-    SKIN = S.skin || 0;
-    lastH = H;
+    if (wW) state.W = wW;
+    state.SKIN = S.skin || 0;
+    state.lastH = H;
     var L = layout(H);
     var hits = [];
     // 四条震屏：整层 translate（±6px，300ms 衰减），不震时为恒等变换
@@ -4447,11 +4586,11 @@ define("js/views.js", function (require, module, exports) {
     if (S.tribute) tribute(ctx, S, L, hits);
     // 掉线重连条：常驻在操作带上方，不挡手牌
     if (S.reconnecting) {
-      var rw = 320, rh = 34, rx = (W - rw) / 2;
+      var rw = 320, rh = 34, rx = (state.W - rw) / 2;
       var ry = (L.actions ? L.actions.y : L.hand.y - 80) - 44;
       box(ctx, rx, ry, rw, rh, 17, 'rgba(140,47,42,0.92)', 'rgba(255,210,180,0.6)');
       txt(ctx, '连接断开，正在重连 ' + (S.reconnectTries || 1) + '/8 …',
-        W / 2, ry + rh / 2, 14, '#ffe9dd', 'center', 600);
+        state.W / 2, ry + rh / 2, 14, '#ffe9dd', 'center', 600);
     }
     if (S.phase === 'settle') settle(ctx, S, L, hits);
     fxOverlay(ctx, S, L, H);

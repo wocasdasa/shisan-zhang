@@ -10,7 +10,8 @@ const FILES = [
   'js/engine/cards.js', 'js/engine/rules.js', 'js/engine/camp.js', 'js/engine/info.js',
   'js/engine/hand.js', 'js/engine/moves.js', 'js/engine/table.js',
   'js/engine/ai.js', 'js/engine/ai2.js', 'js/engine/settle.js', 'js/engine/tribute.js',
-  'js/engine/index.js', 'js/config.js', 'js/audio.js', 'js/net.js', 'js/platform.js', 'js/views.js', 'js/app.js'
+  'js/engine/index.js', 'js/config.js', 'js/audio.js', 'js/net.js', 'js/platform.js',
+  'js/views/base.js', 'js/views/table.js', 'js/views/panels.js', 'js/views.js', 'js/app.js'
 ];
 
 function safe(src) { return src.replace(/<\/script>/gi, '<\\/script>'); }
