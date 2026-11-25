@@ -1663,6 +1663,12 @@ define("js/net.js", function (require, module, exports) {
 (function () {
   var isWx = (typeof wx !== 'undefined') && (typeof wx.connectSocket === 'function');
   var hasCloud = (typeof wx !== 'undefined') && wx.cloud && (typeof wx.cloud.callFunction === 'function');
+  // 云开发分支当前只有链路桩（没有房间逻辑）：默认关闭，避免小游戏里 create/join 永远收不到回包
+  // 要真用云开发，先 wx.setStorageSync('gx13_cloud', '1') 并把云函数补齐
+  var cloudOn = false;
+  try {
+    cloudOn = !!hasCloud && String(wx.getStorageSync('gx13_cloud') || '') === '1';
+  } catch (e) { cloudOn = false; }
 
   // 云开发环境（开通云开发后控制台可见；也可用 wx.setStorageSync('gx13_env', 'xxx') 覆盖）
   var ENV_KEY = 'gx13_env';
@@ -1689,7 +1695,7 @@ define("js/net.js", function (require, module, exports) {
   var POLL_MS = 800;
 
   function defaultUrl() {
-    if (hasCloud) return '云开发 ' + CLOUD_ENV;
+    if (cloudOn) return '云开发 ' + CLOUD_ENV;
     if (isWx) {
       try {
         var saved = wx.getStorageSync('gx13_server');
@@ -1862,7 +1868,7 @@ define("js/net.js", function (require, module, exports) {
 
   // ---------- 统一接口 ----------
   function connect(url) {
-    if (hasCloud && (!url || url.indexOf('ws://') < 0 && url.indexOf('wss://') < 0)) {
+    if (cloudOn && (!url || url.indexOf('ws://') < 0 && url.indexOf('wss://') < 0)) {
       cloudConnect();
       return;
     }
@@ -1887,7 +1893,8 @@ define("js/net.js", function (require, module, exports) {
 
   var NET = {
     isWx: isWx,
-    isCloud: hasCloud,
+    isCloud: cloudOn,
+    hasCloudSdk: hasCloud,
     cloudEnv: function () { return CLOUD_ENV; },
     defaultUrl: defaultUrl,
     connect: connect,
@@ -2799,10 +2806,10 @@ define("js/views.js", function (require, module, exports) {
   function header(ctx, S, L, hits) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
     var online = S.mode === 'online';
-    // 副标题右移，给左上角的「菜单」让位
+    // 副标题收在标题正下方，左侧整块留给标题，右上角留给功能 chip
     txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '单机 · 三家 AI',
-      126, 74, 15, online ? C.gold : C.dim, 'left', 400);
-    hits.push({ x: 112, y: 54, w: 200, h: 30, act: 'mode' });
+      26, 66, 14, online ? C.gold : C.dim, 'left', 400);
+    hits.push({ x: 16, y: 52, w: 180, h: 26, act: 'mode' });
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = W - 24;
@@ -2874,12 +2881,20 @@ define("js/views.js", function (require, module, exports) {
     txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
 
-    // 对局菜单固定在左上角（副标题已右移让位）
+    // 左上角：主界面（二次确认）+ 菜单
     var mx = 20, my = y2;
-    box(ctx, mx, my, 84, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
+    var ep = (S.exitPending || 0) > Date.now();
+    box(ctx, mx, my, 84, h2, rad2, ep ? 'rgba(216,179,106,0.22)' : C.btn,
+      ep ? C.gold : C.panelLine);
+    txt(ctx, ep ? '确认退出' : '主界面', mx + 42, my + h2 / 2, ep ? 13 : fs2,
+      ep ? C.gold : C.text, 'center', 600);
+    hits.push({ x: mx, y: my, w: 84, h: h2, act: 'exitHome' });
+
+    var mx2 = mx + 84 + 8;
+    box(ctx, mx2, my, 78, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
       S.pauseOpen ? C.gold : C.panelLine);
-    txt(ctx, '菜单', mx + 42, my + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text, 'center', 600);
-    hits.push({ x: mx, y: my, w: 84, h: h2, act: 'pause' });
+    txt(ctx, '菜单', mx2 + 39, my + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text, 'center', 600);
+    hits.push({ x: mx2, y: my, w: 78, h: h2, act: 'pause' });
   }
 
   // ---------- 座位 ----------
@@ -3753,6 +3768,10 @@ define("js/views.js", function (require, module, exports) {
       txt(ctx, '联机对战', W / 2, py + 56, 28, C.gold, 'center', 600);
       txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', W / 2, py + 88, 14, C.dim);
       txt(ctx, '服务器 ' + (S.lobby.url || ''), W / 2, py + 112, 13, C.dim);
+      if (/ws:\/\/127\.0\.0\.1|ws:\/\/localhost/.test(S.lobby.url || '')) {
+        txt(ctx, '真机需 wss 域名：wx.setStorageSync("gx13_server", "wss://…")',
+          W / 2, py + 134, 12, '#e8b0ae');
+      }
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
@@ -3929,26 +3948,32 @@ define("js/views.js", function (require, module, exports) {
   function chatPanel(ctx, S, L, hits) {
     var H = L.H;
     overlay(ctx, H, W, H);
-    var pw = 640, ph = 620;
-    var px = (W - pw) / 2, py = Math.max(24, (H - ph) / 2);
+    var pw = 640, ph = 668;
+    var px = (W - pw) / 2, py = Math.max(16, (H - ph) / 2);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     txt(ctx, '发言', W / 2, py + 40, 22, C.gold, 'center', 600);
 
     // 最近 5 条
     var msgs = (S.chats || []).slice(-5);
     if (!msgs.length) {
-      txt(ctx, '还没人说话，点下面的表情或短语发一句', W / 2, py + 104, 14, C.dim);
+      txt(ctx, '还没人说话，点下面的表情、短语或「打字」发一句', W / 2, py + 100, 14, C.dim);
     } else {
       msgs.forEach(function (c, i) {
-        var y = py + 82 + i * 24;
+        var y = py + 80 + i * 23;
         txt(ctx, chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text,
           px + 28, y, c.kind === 'emoji' ? 18 : 14, c.rel === 0 ? C.gold : C.text, 'left');
       });
     }
 
+    // 打字发言（自己的话一定看得见）
+    var typeY = py + 190, typeH = 44;
+    box(ctx, px + 24, typeY, pw - 48, typeH, 12, C.btn, C.panelLine);
+    txt(ctx, '✎ 打字发言（≤16 字）', px + pw / 2, typeY + typeH / 2, 15, C.text, 'center', 600);
+    hits.push({ x: px + 24, y: typeY, w: pw - 48, h: typeH, act: 'chatType' });
+
     // 表情：8×2
     var ec = (S.chatEmoji || []);
-    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 214;
+    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 250;
     ec.slice(0, 16).forEach(function (e, i) {
       var c = i % 8, r = Math.floor(i / 8);
       var x = gx0 + c * cellW, y = gy0 + r * cellH;
@@ -3959,7 +3984,7 @@ define("js/views.js", function (require, module, exports) {
 
     // 短语：2×4
     var phs = (S.chatPhrases || []);
-    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 330;
+    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 366;
     phs.slice(0, 8).forEach(function (p, i) {
       var c = i % 2, r = Math.floor(i / 2);
       var x = c ? W / 2 + 10 : gx1, y = gy1 + r * 50;
@@ -4791,6 +4816,19 @@ define("js/app.js", function (require, module, exports) {
   function sendChat(kind, text) {
     if (S.mode !== 'online' || !S.room) { toast('联机房间里才能发言'); return; }
     NET.send({ t: 'chat', kind: kind, text: text });
+    // 先本地回显，等服务端 state 回来再对齐（避免「发完看不到自己说了什么」）
+    S.chats = (S.chats || []).concat([{ rel: 0, kind: kind, text: text, ts: Date.now(), pending: true }]);
+    if (S.chats.length > 12) S.chats = S.chats.slice(-12);
+    if (S.chatOpen) SFX.play('chat');
+    P.markDirty();
+  }
+
+  // 打字发言：微信走 showKeyboard，浏览器走 prompt
+  function typeChat() {
+    P.askText('说点什么（≤16 字）', '', 16, function (v) {
+      var t = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 16);
+      if (t) sendChat('text', t);
+    });
   }
 
   // 预置表情/短语：画布内不调输入法，点一下即发
@@ -4996,6 +5034,11 @@ define("js/app.js", function (require, module, exports) {
       if (!S.reconnecting) toast('已连接服务器');
       P.markDirty();
     });
+    NET.on('error', function (e) {
+      S.netStatus = '连接失败';
+      if (S.lobby) S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      P.markDirty();
+    });
     NET.on('close', function () {
       S.netStatus = '连接断开';
       if (S.mode === 'online' && S.rejoin && !S.leaving) {
@@ -5051,6 +5094,26 @@ define("js/app.js", function (require, module, exports) {
     S.lobby = { kind: 'entry', url: NET.defaultUrl(), err: '', code: '' };
     S.phase = 'lobby';
     bindNet();
+    P.markDirty();
+  }
+
+  // 回主界面：联机顺带退房；单机直接回标题
+  function doExitHome() {
+    if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
+    clearTurnTimer();
+    clearTributeTimer();
+    SFX.flush();
+    if (dealTick) { clearInterval(dealTick); dealTick = null; }
+    S.phase = 'menu';
+    S.testMenu = false;
+    S.testDeck = false;
+    S.summary = false;
+    S.game = null;
+    S.deal = null;
+    S.tribute = null;
+    S.selected = [];
+    S.auto = false;
+    S.autoPending = false;
     P.markDirty();
   }
 
@@ -5149,9 +5212,19 @@ define("js/app.js", function (require, module, exports) {
     // 发言：服务端时间戳可能与手机不同步，这里换成客户端时间轴
     // 新到的条目给「现在」，历史条目压到 8 秒前（只进面板、不冒气泡）
     var seenTs = S.chatSeenTs || 0;
+    var pend = (S.chats || []).filter(function (c) {
+      return c.pending && Date.now() - (c.ts || 0) < 8000;
+    });
     S.chats = (v.chat || []).map(function (c) {
       var fresh = (c.ts || 0) > seenTs;
       return { rel: c.rel, kind: c.kind, text: c.text, ts: fresh ? Date.now() : Date.now() - 8000 };
+    });
+    // 服务端还没回显的自己那句，先补上；已被回显的则去掉 pending，避免重复
+    pend.forEach(function (p) {
+      var dup = S.chats.some(function (c) {
+        return c.rel === 0 && c.kind === p.kind && c.text === p.text;
+      });
+      if (!dup) S.chats.push(p);
     });
     S.chatSeenTs = (v.chat || []).reduce(function (m, c) { return Math.max(m, c.ts || 0); }, seenTs);
     // 自己在桌上的座位名跟着本地昵称走，免得服务端还没回包时显示旧名字
@@ -5822,7 +5895,7 @@ define("js/app.js", function (require, module, exports) {
         act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
         act === 'music' || act === 'vib' || act === 'skin');
     }
-    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText');
+    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText' || act === 'chatType');
     return false;
   }
 
@@ -5923,6 +5996,7 @@ define("js/app.js", function (require, module, exports) {
     if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
     if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
     if (h.act === 'chatText') { sendChat('text', h.text); return; }
+    if (h.act === 'chatType') { typeChat(); return; }
     if (h.act === 'card') { tapCard(h.i); return; }
     if (h.act === 'auto') {
       if (S.auto) { cancelAuto(); return; }
@@ -5934,21 +6008,21 @@ define("js/app.js", function (require, module, exports) {
     }
     if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
     if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
-    if (h.act === 'exitToMenu') {
+    if (h.act === 'exitToMenu') { S.pauseOpen = false; doExitHome(); return; }
+    if (h.act === 'exitHome') {
+      // 主界面按钮在局内：一次点击只提醒，3 秒内再点才真退出，防误触
+      if (Date.now() > (S.exitPending || 0)) {
+        S.exitPending = Date.now() + 3000;
+        toast('再点一次「主界面」确认离开本局');
+        P.markDirty();
+        setTimeout(function () {
+          if (S.exitPending && Date.now() >= S.exitPending) { S.exitPending = 0; P.markDirty(); }
+        }, 3100);
+        return;
+      }
+      S.exitPending = 0;
       S.pauseOpen = false;
-      if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
-      clearTurnTimer();
-      clearTributeTimer();
-      SFX.flush();
-      S.phase = 'menu';
-      S.testMenu = false;
-      S.testDeck = false;
-      S.summary = false;
-      S.game = null;
-      S.deal = null;
-      S.tribute = null;
-      S.selected = [];
-      P.markDirty();
+      doExitHome();
       return;
     }
     if (h.act === 'tools') {

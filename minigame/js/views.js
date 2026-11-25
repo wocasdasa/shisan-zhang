@@ -696,10 +696,10 @@
   function header(ctx, S, L, hits) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
     var online = S.mode === 'online';
-    // 副标题右移，给左上角的「菜单」让位
+    // 副标题收在标题正下方，左侧整块留给标题，右上角留给功能 chip
     txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '单机 · 三家 AI',
-      126, 74, 15, online ? C.gold : C.dim, 'left', 400);
-    hits.push({ x: 112, y: 54, w: 200, h: 30, act: 'mode' });
+      26, 66, 14, online ? C.gold : C.dim, 'left', 400);
+    hits.push({ x: 16, y: 52, w: 180, h: 26, act: 'mode' });
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = W - 24;
@@ -771,12 +771,20 @@
     txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
 
-    // 对局菜单固定在左上角（副标题已右移让位）
+    // 左上角：主界面（二次确认）+ 菜单
     var mx = 20, my = y2;
-    box(ctx, mx, my, 84, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
+    var ep = (S.exitPending || 0) > Date.now();
+    box(ctx, mx, my, 84, h2, rad2, ep ? 'rgba(216,179,106,0.22)' : C.btn,
+      ep ? C.gold : C.panelLine);
+    txt(ctx, ep ? '确认退出' : '主界面', mx + 42, my + h2 / 2, ep ? 13 : fs2,
+      ep ? C.gold : C.text, 'center', 600);
+    hits.push({ x: mx, y: my, w: 84, h: h2, act: 'exitHome' });
+
+    var mx2 = mx + 84 + 8;
+    box(ctx, mx2, my, 78, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
       S.pauseOpen ? C.gold : C.panelLine);
-    txt(ctx, '菜单', mx + 42, my + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text, 'center', 600);
-    hits.push({ x: mx, y: my, w: 84, h: h2, act: 'pause' });
+    txt(ctx, '菜单', mx2 + 39, my + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text, 'center', 600);
+    hits.push({ x: mx2, y: my, w: 78, h: h2, act: 'pause' });
   }
 
   // ---------- 座位 ----------
@@ -1650,6 +1658,10 @@
       txt(ctx, '联机对战', W / 2, py + 56, 28, C.gold, 'center', 600);
       txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', W / 2, py + 88, 14, C.dim);
       txt(ctx, '服务器 ' + (S.lobby.url || ''), W / 2, py + 112, 13, C.dim);
+      if (/ws:\/\/127\.0\.0\.1|ws:\/\/localhost/.test(S.lobby.url || '')) {
+        txt(ctx, '真机需 wss 域名：wx.setStorageSync("gx13_server", "wss://…")',
+          W / 2, py + 134, 12, '#e8b0ae');
+      }
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
@@ -1826,26 +1838,32 @@
   function chatPanel(ctx, S, L, hits) {
     var H = L.H;
     overlay(ctx, H, W, H);
-    var pw = 640, ph = 620;
-    var px = (W - pw) / 2, py = Math.max(24, (H - ph) / 2);
+    var pw = 640, ph = 668;
+    var px = (W - pw) / 2, py = Math.max(16, (H - ph) / 2);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     txt(ctx, '发言', W / 2, py + 40, 22, C.gold, 'center', 600);
 
     // 最近 5 条
     var msgs = (S.chats || []).slice(-5);
     if (!msgs.length) {
-      txt(ctx, '还没人说话，点下面的表情或短语发一句', W / 2, py + 104, 14, C.dim);
+      txt(ctx, '还没人说话，点下面的表情、短语或「打字」发一句', W / 2, py + 100, 14, C.dim);
     } else {
       msgs.forEach(function (c, i) {
-        var y = py + 82 + i * 24;
+        var y = py + 80 + i * 23;
         txt(ctx, chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text,
           px + 28, y, c.kind === 'emoji' ? 18 : 14, c.rel === 0 ? C.gold : C.text, 'left');
       });
     }
 
+    // 打字发言（自己的话一定看得见）
+    var typeY = py + 190, typeH = 44;
+    box(ctx, px + 24, typeY, pw - 48, typeH, 12, C.btn, C.panelLine);
+    txt(ctx, '✎ 打字发言（≤16 字）', px + pw / 2, typeY + typeH / 2, 15, C.text, 'center', 600);
+    hits.push({ x: px + 24, y: typeY, w: pw - 48, h: typeH, act: 'chatType' });
+
     // 表情：8×2
     var ec = (S.chatEmoji || []);
-    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 214;
+    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 250;
     ec.slice(0, 16).forEach(function (e, i) {
       var c = i % 8, r = Math.floor(i / 8);
       var x = gx0 + c * cellW, y = gy0 + r * cellH;
@@ -1856,7 +1874,7 @@
 
     // 短语：2×4
     var phs = (S.chatPhrases || []);
-    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 330;
+    var bw2 = 280, bh2 = 42, gx1 = W / 2 - bw2 - 10, gy1 = py + 366;
     phs.slice(0, 8).forEach(function (p, i) {
       var c = i % 2, r = Math.floor(i / 2);
       var x = c ? W / 2 + 10 : gx1, y = gy1 + r * 50;

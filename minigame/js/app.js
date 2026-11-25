@@ -449,6 +449,19 @@
   function sendChat(kind, text) {
     if (S.mode !== 'online' || !S.room) { toast('联机房间里才能发言'); return; }
     NET.send({ t: 'chat', kind: kind, text: text });
+    // 先本地回显，等服务端 state 回来再对齐（避免「发完看不到自己说了什么」）
+    S.chats = (S.chats || []).concat([{ rel: 0, kind: kind, text: text, ts: Date.now(), pending: true }]);
+    if (S.chats.length > 12) S.chats = S.chats.slice(-12);
+    if (S.chatOpen) SFX.play('chat');
+    P.markDirty();
+  }
+
+  // 打字发言：微信走 showKeyboard，浏览器走 prompt
+  function typeChat() {
+    P.askText('说点什么（≤16 字）', '', 16, function (v) {
+      var t = String(v || '').replace(/\s+/g, ' ').trim().slice(0, 16);
+      if (t) sendChat('text', t);
+    });
   }
 
   // 预置表情/短语：画布内不调输入法，点一下即发
@@ -654,6 +667,11 @@
       if (!S.reconnecting) toast('已连接服务器');
       P.markDirty();
     });
+    NET.on('error', function (e) {
+      S.netStatus = '连接失败';
+      if (S.lobby) S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      P.markDirty();
+    });
     NET.on('close', function () {
       S.netStatus = '连接断开';
       if (S.mode === 'online' && S.rejoin && !S.leaving) {
@@ -709,6 +727,26 @@
     S.lobby = { kind: 'entry', url: NET.defaultUrl(), err: '', code: '' };
     S.phase = 'lobby';
     bindNet();
+    P.markDirty();
+  }
+
+  // 回主界面：联机顺带退房；单机直接回标题
+  function doExitHome() {
+    if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
+    clearTurnTimer();
+    clearTributeTimer();
+    SFX.flush();
+    if (dealTick) { clearInterval(dealTick); dealTick = null; }
+    S.phase = 'menu';
+    S.testMenu = false;
+    S.testDeck = false;
+    S.summary = false;
+    S.game = null;
+    S.deal = null;
+    S.tribute = null;
+    S.selected = [];
+    S.auto = false;
+    S.autoPending = false;
     P.markDirty();
   }
 
@@ -807,9 +845,19 @@
     // 发言：服务端时间戳可能与手机不同步，这里换成客户端时间轴
     // 新到的条目给「现在」，历史条目压到 8 秒前（只进面板、不冒气泡）
     var seenTs = S.chatSeenTs || 0;
+    var pend = (S.chats || []).filter(function (c) {
+      return c.pending && Date.now() - (c.ts || 0) < 8000;
+    });
     S.chats = (v.chat || []).map(function (c) {
       var fresh = (c.ts || 0) > seenTs;
       return { rel: c.rel, kind: c.kind, text: c.text, ts: fresh ? Date.now() : Date.now() - 8000 };
+    });
+    // 服务端还没回显的自己那句，先补上；已被回显的则去掉 pending，避免重复
+    pend.forEach(function (p) {
+      var dup = S.chats.some(function (c) {
+        return c.rel === 0 && c.kind === p.kind && c.text === p.text;
+      });
+      if (!dup) S.chats.push(p);
     });
     S.chatSeenTs = (v.chat || []).reduce(function (m, c) { return Math.max(m, c.ts || 0); }, seenTs);
     // 自己在桌上的座位名跟着本地昵称走，免得服务端还没回包时显示旧名字
@@ -1480,7 +1528,7 @@
         act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
         act === 'music' || act === 'vib' || act === 'skin');
     }
-    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText');
+    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText' || act === 'chatType');
     return false;
   }
 
@@ -1581,6 +1629,7 @@
     if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
     if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
     if (h.act === 'chatText') { sendChat('text', h.text); return; }
+    if (h.act === 'chatType') { typeChat(); return; }
     if (h.act === 'card') { tapCard(h.i); return; }
     if (h.act === 'auto') {
       if (S.auto) { cancelAuto(); return; }
@@ -1592,21 +1641,21 @@
     }
     if (h.act === 'pause') { S.pauseOpen = true; S.toolsOpen = false; P.markDirty(); return; }
     if (h.act === 'pauseClose') { S.pauseOpen = false; P.markDirty(); return; }
-    if (h.act === 'exitToMenu') {
+    if (h.act === 'exitToMenu') { S.pauseOpen = false; doExitHome(); return; }
+    if (h.act === 'exitHome') {
+      // 主界面按钮在局内：一次点击只提醒，3 秒内再点才真退出，防误触
+      if (Date.now() > (S.exitPending || 0)) {
+        S.exitPending = Date.now() + 3000;
+        toast('再点一次「主界面」确认离开本局');
+        P.markDirty();
+        setTimeout(function () {
+          if (S.exitPending && Date.now() >= S.exitPending) { S.exitPending = 0; P.markDirty(); }
+        }, 3100);
+        return;
+      }
+      S.exitPending = 0;
       S.pauseOpen = false;
-      if (S.mode === 'online') { backToSolo(); toast('已离开房间'); return; }
-      clearTurnTimer();
-      clearTributeTimer();
-      SFX.flush();
-      S.phase = 'menu';
-      S.testMenu = false;
-      S.testDeck = false;
-      S.summary = false;
-      S.game = null;
-      S.deal = null;
-      S.tribute = null;
-      S.selected = [];
-      P.markDirty();
+      doExitHome();
       return;
     }
     if (h.act === 'tools') {

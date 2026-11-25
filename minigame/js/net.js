@@ -4,6 +4,12 @@
 (function () {
   var isWx = (typeof wx !== 'undefined') && (typeof wx.connectSocket === 'function');
   var hasCloud = (typeof wx !== 'undefined') && wx.cloud && (typeof wx.cloud.callFunction === 'function');
+  // 云开发分支当前只有链路桩（没有房间逻辑）：默认关闭，避免小游戏里 create/join 永远收不到回包
+  // 要真用云开发，先 wx.setStorageSync('gx13_cloud', '1') 并把云函数补齐
+  var cloudOn = false;
+  try {
+    cloudOn = !!hasCloud && String(wx.getStorageSync('gx13_cloud') || '') === '1';
+  } catch (e) { cloudOn = false; }
 
   // 云开发环境（开通云开发后控制台可见；也可用 wx.setStorageSync('gx13_env', 'xxx') 覆盖）
   var ENV_KEY = 'gx13_env';
@@ -30,7 +36,7 @@
   var POLL_MS = 800;
 
   function defaultUrl() {
-    if (hasCloud) return '云开发 ' + CLOUD_ENV;
+    if (cloudOn) return '云开发 ' + CLOUD_ENV;
     if (isWx) {
       try {
         var saved = wx.getStorageSync('gx13_server');
@@ -203,7 +209,7 @@
 
   // ---------- 统一接口 ----------
   function connect(url) {
-    if (hasCloud && (!url || url.indexOf('ws://') < 0 && url.indexOf('wss://') < 0)) {
+    if (cloudOn && (!url || url.indexOf('ws://') < 0 && url.indexOf('wss://') < 0)) {
       cloudConnect();
       return;
     }
@@ -228,7 +234,8 @@
 
   var NET = {
     isWx: isWx,
-    isCloud: hasCloud,
+    isCloud: cloudOn,
+    hasCloudSdk: hasCloud,
     cloudEnv: function () { return CLOUD_ENV; },
     defaultUrl: defaultUrl,
     connect: connect,
