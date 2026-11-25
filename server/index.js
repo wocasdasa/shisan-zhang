@@ -1,14 +1,47 @@
 // 联机服务端：所有出牌/进贡/计分都在这里校验，客户端只负责画和点
+const fs = require('fs');
 const WS = require('./ws.js');
 const GX = require('../engine/index.js');
 
 const PORT = Number(process.env.PORT || 8787);
+const HOST = process.env.HOST || '0.0.0.0';
 const TURN_MS = 20000;
 const DEAL_MS = 2200;
 const DBG = !!process.env.DEBUG;
 
+// 公网防护上限（都可用环境变量覆盖）
+const MAX_CONNS = Number(process.env.MAX_CONNS || 400);
+const MAX_ROOMS = Number(process.env.MAX_ROOMS || 200);
+const RATE_MSGS = Number(process.env.RATE_MSGS || 60);      // 单连接每窗口允许的消息数
+const RATE_WIN_MS = Number(process.env.RATE_WIN_MS || 10000); // 窗口长度
+const IDLE_CLOSE_MS = Number(process.env.IDLE_CLOSE_MS || 90000); // 无任何入站数据多久断开
+const ROOM_IDLE_MS = Number(process.env.ROOM_IDLE_MS || 600000);  // 无人在线且无操作多久删房
+
+// 可选 TLS：给了证书就直接 wss://，没给就维持原来的 ws://
+function buildTLS() {
+  try {
+    if (process.env.TLS_PFX) {
+      return {
+        pfx: fs.readFileSync(process.env.TLS_PFX),
+        passphrase: process.env.TLS_PASS || undefined
+      };
+    }
+    if (process.env.TLS_KEY && process.env.TLS_CERT) {
+      return {
+        key: fs.readFileSync(process.env.TLS_KEY),
+        cert: fs.readFileSync(process.env.TLS_CERT)
+      };
+    }
+  } catch (e) {
+    console.error('[tls] 证书读取失败，回退到 ws://：' + e.message);
+  }
+  return null;
+}
+const TLS = buildTLS();
+
 const rooms = new Map();
 const conns = new Map(); // connId -> { conn, roomId, seat, name }
+const liveConns = new Set(); // 所有 TCP 连接（含还没进房的），用于上限与死连接清理
 const aiSeats = new Map(); // roomId -> Set(seat)
 
 let roomSeq = 1000;
@@ -34,6 +67,7 @@ function playerName(room, seat) {
 }
 
 function broadcast(room) {
+  room.lastActivity = Date.now();
   room.seats.forEach((s, seat) => {
     if (!s || s.ai || !s.connId) return;
     const c = conns.get(s.connId);
@@ -126,6 +160,7 @@ function setEvent(room, text) { room.lastEvent = text; }
 
 // ---------- 房间 ----------
 function createRoom(conn, msg) {
+  if (rooms.size >= MAX_ROOMS) { send(conn, { t: 'err', msg: '服务器房间已满，稍后再试' }); return; }
   const id = newRoomId();
   const room = {
     id,
@@ -143,6 +178,7 @@ function createRoom(conn, msg) {
     deadline: 0,
     timer: null,
     lastEvent: '',
+    lastActivity: Date.now(),
     chat: [],
     chatLast: {}
   };
@@ -289,6 +325,21 @@ setInterval(function () {
         if (room.seats[t] && room.seats[t].ai) scheduleTurn(room);
       }
     }
+  });
+
+  // 死连接清理：正常客户端每 25 秒心跳一次，90 秒没有任何入站数据基本可以断定已经断网
+  liveConns.forEach(function (conn) {
+    if (!conn.alive) { liveConns.delete(conn); return; }
+    if (Date.now() - (conn.lastSeen || 0) > IDLE_CLOSE_MS) conn.close();
+  });
+
+  // 空房回收：一个真人都没有、且很久没人操作，就把房间删掉，避免房间号被无限占着
+  rooms.forEach(function (room, id) {
+    if (humanCount(room) > 0) return;
+    if (Date.now() - (room.lastActivity || 0) < ROOM_IDLE_MS) return;
+    if (room.timer) { clearTimeout(room.timer); room.timer = null; }
+    rooms.delete(id);
+    if (DBG) console.log('[gc] 回收空房 ' + id);
   });
 }, 5000);
 
@@ -843,10 +894,43 @@ function errText(code) {
   return map[code] || '出牌不合法';
 }
 
-WS.createServer(PORT, (conn) => {
-  conn.on('message', (msg) => handle(conn, msg));
-  conn.on('close', () => leaveRoom(conn));
+// ---------- 启动（冒烟脚本在这里截断，只加载函数不监听端口） ----------
+const server = WS.createServer(PORT, (conn) => {
+  if (liveConns.size >= MAX_CONNS) { conn.close(); return; }
+  liveConns.add(conn);
+  conn.msgTimes = [];
+
+  conn.on('message', (msg) => {
+    if (!conn.alive) return;
+    const now = Date.now();
+    const times = conn.msgTimes;
+    times.push(now);
+    while (times.length && now - times[0] > RATE_WIN_MS) times.shift();
+    if (times.length > RATE_MSGS) {
+      if (DBG) console.log('[rate] ' + conn.ip + ' 消息过密，断开');
+      conn.close();
+      return;
+    }
+    handle(conn, msg);
+  });
+  conn.on('close', () => { liveConns.delete(conn); leaveRoom(conn); });
   send(conn, { t: 'hello', server: 'guangxi13', turnMs: TURN_MS });
+}, {
+  host: HOST,
+  tls: TLS,
+  maxPayload: 64 * 1024,
+  health: () => ({ rooms: rooms.size, conns: liveConns.size, players: conns.size })
 });
 
-console.log('十三张独食 · 联机服务端已启动  ws://0.0.0.0:' + PORT);
+const scheme = TLS ? 'wss' : 'ws';
+console.log('十三张独食 · 联机服务端已启动  ' + scheme + '://' + HOST + ':' + PORT +
+  '   健康检查: ' + scheme + '://' + HOST + ':' + PORT + '/health');
+
+function shutdown(sig) {
+  console.log('[exit] 收到 ' + sig + '，正在关闭…');
+  try { server.close(); } catch (e) {}
+  liveConns.forEach(function (c) { try { c.close(); } catch (e) {} });
+  setTimeout(function () { process.exit(0); }, 200);
+}
+process.on('SIGINT', function () { shutdown('SIGINT'); });
+process.on('SIGTERM', function () { shutdown('SIGTERM'); });

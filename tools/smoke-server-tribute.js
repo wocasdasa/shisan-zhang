@@ -6,8 +6,8 @@ const path = require('path');
 
 const SERVER = path.join(__dirname, '..', 'server', 'index.js');
 const src = fs.readFileSync(SERVER, 'utf8');
-const cut = src.indexOf('WS.createServer(PORT');
-if (cut < 0) { console.error('FAIL: 找不到 WS.createServer 截断点'); process.exit(1); }
+const cut = src.indexOf('// ---------- 启动');
+if (cut < 0) { console.error('FAIL: 找不到启动截断点（server/index.js 的「启动」注释）'); process.exit(1); }
 
 const GX = require(path.join(__dirname, '..', 'engine', 'index.js'));
 

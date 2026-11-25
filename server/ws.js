@@ -1,10 +1,13 @@
 // 极简 WebSocket 服务端（RFC6455 文本帧），不依赖第三方包
 // 只处理：握手、文本帧、关闭、ping/pong。够本项目的联机用。
+// 可选 TLS：传入 opts.tls（{key,cert} 或 {pfx,passphrase}）即用 https 提供服务，直接支持 wss://
 const crypto = require('crypto');
 const http = require('http');
+const https = require('https');
 const { EventEmitter } = require('events');
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const DEFAULT_MAX_PAYLOAD = 64 * 1024; // 单帧上限：本项目最大消息是整桌快照，远小于 64KB
 
 function encodeFrame(opcode, payload) {
   const data = Buffer.isBuffer(payload) ? payload : Buffer.from(String(payload), 'utf8');
@@ -27,14 +30,18 @@ function encodeFrame(opcode, payload) {
 }
 
 class Conn extends EventEmitter {
-  constructor(socket) {
+  constructor(socket, opts) {
     super();
     this.socket = socket;
     this.alive = true;
     this.buf = Buffer.alloc(0);
     this.id = crypto.randomBytes(4).toString('hex');
+    this.maxPayload = (opts && opts.maxPayload) || DEFAULT_MAX_PAYLOAD;
+    this.lastSeen = Date.now(); // 任意入站数据都会刷新，用于清理死连接
+    this.ip = String(socket.remoteAddress || '').replace(/^::ffff:/, '');
 
     socket.on('data', (chunk) => {
+      this.lastSeen = Date.now();
       this.buf = Buffer.concat([this.buf, chunk]);
       this.drain();
     });
@@ -43,7 +50,7 @@ class Conn extends EventEmitter {
   }
 
   drain() {
-    while (this.buf.length >= 2) {
+    while (this.alive && this.buf.length >= 2) {
       const b0 = this.buf[0];
       const b1 = this.buf[1];
       const fin = (b0 & 0x80) !== 0;
@@ -60,6 +67,8 @@ class Conn extends EventEmitter {
         len = Number(this.buf.readBigUInt64BE(2));
         offset = 10;
       }
+      // 超大帧直接断开，避免公网上有人用畸形长度把内存吃满
+      if (len > this.maxPayload) { this.close(); return; }
       let maskKey = null;
       if (masked) {
         if (this.buf.length < offset + 4) return;
@@ -86,6 +95,8 @@ class Conn extends EventEmitter {
         this.close();
       } else if (opcode === 0x9) {
         this.socket.write(encodeFrame(0xA, payload));
+      } else if (opcode === 0xA) {
+        // pong：lastSeen 已经在 data 事件刷新，这里不用额外处理
       }
     }
   }
@@ -98,17 +109,38 @@ class Conn extends EventEmitter {
   close() {
     if (!this.alive) return;
     this.alive = false;
+    this.buf = Buffer.alloc(0);
     try { this.socket.write(encodeFrame(0x8, Buffer.alloc(0))); } catch (e) {}
     try { this.socket.end(); } catch (e) {}
     this.emit('close');
   }
 }
 
-function createServer(port, onConn) {
-  const server = http.createServer((req, res) => {
+// opts: { host, tls: {key,cert} | {pfx,passphrase}, maxPayload, health: () => object, onListen: fn }
+function createServer(port, onConn, opts) {
+  opts = opts || {};
+  const tls = opts.tls && (opts.tls.pfx || (opts.tls.key && opts.tls.cert)) ? opts.tls : null;
+  const maxPayload = opts.maxPayload || DEFAULT_MAX_PAYLOAD;
+
+  function handler(req, res) {
+    const path = String(req.url || '').split('?')[0];
+    if (path === '/health') {
+      let extra = {};
+      try { extra = opts.health ? opts.health() : {}; } catch (e) { extra = {}; }
+      const body = JSON.stringify(Object.assign({
+        ok: true,
+        uptime: Math.round(process.uptime()),
+        secure: !!tls
+      }, extra));
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(body);
+      return;
+    }
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
     res.end('guangxi13 relay server is running');
-  });
+  }
+
+  const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
 
   server.on('upgrade', (req, socket) => {
     const key = req.headers['sec-websocket-key'];
@@ -120,12 +152,13 @@ function createServer(port, onConn) {
       'Connection: Upgrade\r\n' +
       'Sec-WebSocket-Accept: ' + accept + '\r\n\r\n'
     );
-    const conn = new Conn(socket);
+    const conn = new Conn(socket, { maxPayload });
     if (onConn) onConn(conn, req);
   });
 
-  server.listen(port, '0.0.0.0');
+  server.on('clientError', (err, socket) => { try { socket.destroy(); } catch (e) {} });
+  server.listen(port, opts.host || '0.0.0.0', opts.onListen);
   return server;
 }
 
-module.exports = { createServer };
+module.exports = { createServer, Conn };
