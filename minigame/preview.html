@@ -2799,9 +2799,10 @@ define("js/views.js", function (require, module, exports) {
   function header(ctx, S, L, hits) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
     var online = S.mode === 'online';
+    // 副标题右移，给左上角的「菜单」让位
     txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '单机 · 三家 AI',
-      24, 74, 15, online ? C.gold : C.dim, 'left', 400);
-    hits.push({ x: 16, y: 54, w: 240, h: 36, act: 'mode' });
+      126, 74, 15, online ? C.gold : C.dim, 'left', 400);
+    hits.push({ x: 112, y: 54, w: 200, h: 30, act: 'mode' });
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = W - 24;
@@ -2873,12 +2874,12 @@ define("js/views.js", function (require, module, exports) {
     txt(ctx, '引导', x2 + 39, y2 + h2 / 2, fs2, C.gold);
     hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'guide' });
 
-    // 对局菜单：返回主界面 / 托管 / 记牌 / 战绩 / 音乐…
-    x2 -= gap2 + 78;
-    box(ctx, x2, y2, 78, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
+    // 对局菜单固定在左上角（副标题已右移让位）
+    var mx = 20, my = y2;
+    box(ctx, mx, my, 84, h2, rad2, S.pauseOpen ? 'rgba(216,179,106,0.22)' : C.btn,
       S.pauseOpen ? C.gold : C.panelLine);
-    txt(ctx, '菜单', x2 + 39, y2 + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text);
-    hits.push({ x: x2, y: y2, w: 78, h: h2, act: 'pause' });
+    txt(ctx, '菜单', mx + 42, my + h2 / 2, fs2, S.pauseOpen ? C.gold : C.text, 'center', 600);
+    hits.push({ x: mx, y: my, w: 84, h: h2, act: 'pause' });
   }
 
   // ---------- 座位 ----------
