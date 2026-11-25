@@ -1619,6 +1619,18 @@
     }
     if (h.act === 'netCfgConfirm') { netCreate(); return; }
     if (h.act === 'netKeypad') { S.lobby = { kind: 'keypad', code: '', err: '' }; P.markDirty(); return; }
+    if (h.act === 'netServer') {
+      P.askText('联机服务器地址（ws:// 或 wss://）', NET.defaultUrl(), 80, function (v) {
+        var s = String(v || '').trim();
+        if (!s) return;
+        try { if (typeof wx !== 'undefined' && wx.setStorageSync) wx.setStorageSync('gx13_server', s); } catch (e) {}
+        try { if (typeof localStorage !== 'undefined') localStorage.setItem('gx13_server', s); } catch (e) {}
+        S.lobby = { kind: 'entry', url: s, err: '', code: '' };
+        P.markDirty();
+        toast('服务器已改为 ' + s);
+      });
+      return;
+    }
     if (h.act === 'netBack') { backToSolo(); return; }
     if (h.act === 'netDigit') {
       if (S.lobby && S.lobby.code.length < 4) S.lobby.code += h.d;

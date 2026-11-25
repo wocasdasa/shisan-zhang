@@ -11,6 +11,12 @@
     cloudOn = !!hasCloud && String(wx.getStorageSync('gx13_cloud') || '') === '1';
   } catch (e) { cloudOn = false; }
 
+  // 构建期默认地址（minigame/js/config.js）；留空表示不覆盖
+  var CFG = {};
+  try {
+    if (typeof module === 'object' && module.exports && require) CFG = require('./config.js') || {};
+  } catch (e) { CFG = {}; }
+
   // 云开发环境（开通云开发后控制台可见；也可用 wx.setStorageSync('gx13_env', 'xxx') 覆盖）
   var ENV_KEY = 'gx13_env';
   var DEFAULT_ENV = (typeof GX_CLOUD_ENV !== 'undefined' && GX_CLOUD_ENV) || 'cloud1-d7g8xcknn7afb1637';
@@ -27,6 +33,15 @@
   var queue = [];
   var open = false;
 
+  // 心跳：每 25 秒发一次 ping；60 秒没有任何入站消息就判定断线，交给上层重连
+  // 公网 NAT/代理通常会把 60~90 秒没有数据的连接掐掉，没有心跳就会出现「人不掉但消息发不出去」
+  // 两个值都可以在 config.js 里覆盖（联调时能调短，正式环境用默认）
+  var HB_MS = (CFG && CFG.HB_MS) || 25000;
+  var HB_DEAD_MS = (CFG && CFG.HB_DEAD_MS) || 60000;
+  var hbTimer = null;
+  var lastMsgAt = 0;
+  var closedNotified = false;
+
   // 云开发模式的状态
   var cloudMode = false;
   var cloudRoom = '';
@@ -42,28 +57,61 @@
         var saved = wx.getStorageSync('gx13_server');
         if (saved) return saved;
       } catch (e) {}
+      if (CFG && CFG.SERVER_URL) return CFG.SERVER_URL;
       return 'ws://127.0.0.1:8787';
     }
     if (typeof window !== 'undefined' && window.location) {
       var q = /(?:\?|&)server=([^&]+)/.exec(window.location.search || '');
       if (q) return decodeURIComponent(q[1]);
+      try {
+        var savedB = window.localStorage && window.localStorage.getItem('gx13_server');
+        if (savedB) return savedB;
+      } catch (e) {}
       var host = window.location.hostname || '127.0.0.1';
       if (!host || host === '') host = '127.0.0.1';
+      // 预览页被挂在 https 上时，默认应该走 wss，而不是退化成明文端口
+      if (window.location.protocol === 'https:') return 'wss://' + host;
       return 'ws://' + host + ':8787';
     }
+    if (CFG && CFG.SERVER_URL) return CFG.SERVER_URL;
     return 'ws://127.0.0.1:8787';
   }
 
   function on(evt, fn) { handlers[evt] = fn; }
 
+  function startHeartbeat() {
+    stopHeartbeat();
+    lastMsgAt = Date.now();
+    hbTimer = setInterval(function () {
+      if (!open) return;
+      rawSend({ t: 'ping' });
+      if (Date.now() - lastMsgAt > HB_DEAD_MS) {
+        fire('close'); // 先通知上层进入重连，再关掉这条已经没救的连接
+        close();
+      }
+    }, HB_MS);
+  }
+
+  function stopHeartbeat() {
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+  }
+
   function fire(evt, arg) {
     if (evt === 'open') {
       open = true;
+      closedNotified = false;
+      lastMsgAt = Date.now();
+      startHeartbeat();
       if (handlers.open) handlers.open();
       while (queue.length) send(queue.shift());
       return;
     }
-    if (evt === 'close') open = false;
+    if (evt === 'close') {
+      if (closedNotified) return;
+      closedNotified = true;
+      open = false;
+      stopHeartbeat();
+    }
     if (handlers[evt]) handlers[evt](arg);
   }
 
@@ -173,19 +221,23 @@
     close();
     url = url || defaultUrl();
     open = false;
+    var s = null;
     try {
       if (isWx) {
-        sock = wx.connectSocket({ url: url });
-        sock.onOpen(function () { fire('open'); });
-        sock.onMessage(function (res) { parse(res.data); });
-        sock.onClose(function () { fire('close'); });
-        sock.onError(function (e) { fire('error', e); });
+        s = wx.connectSocket({ url: url });
+        sock = s;
+        // 只认当前这条 socket 的回调，避免旧的连接晚到的 close 把新连接的状态冲掉
+        s.onOpen(function () { if (sock === s) fire('open'); });
+        s.onMessage(function (res) { if (sock === s) parse(res.data); });
+        s.onClose(function () { if (sock === s) fire('close'); });
+        s.onError(function (e) { if (sock === s) fire('error', e); });
       } else {
-        sock = new WebSocket(url);
-        sock.onopen = function () { fire('open'); };
-        sock.onmessage = function (e) { parse(e.data); };
-        sock.onclose = function () { fire('close'); };
-        sock.onerror = function (e) { fire('error', e); };
+        s = new WebSocket(url);
+        sock = s;
+        s.onopen = function () { if (sock === s) fire('open'); };
+        s.onmessage = function (e) { if (sock === s) parse(e.data); };
+        s.onclose = function () { if (sock === s) fire('close'); };
+        s.onerror = function (e) { if (sock === s) fire('error', e); };
       }
     } catch (e) { fire('error', e); }
   }
@@ -193,6 +245,7 @@
   function parse(raw) {
     var msg;
     try { msg = JSON.parse(raw); } catch (e) { return; }
+    lastMsgAt = Date.now();
     if (handlers.message) handlers.message(msg);
   }
 
@@ -223,13 +276,16 @@
   }
 
   function close() {
+    var wasOpen = open;
     open = false;
     queue.length = 0;
     stopPolling();
+    stopHeartbeat();
     try {
       if (sock) { if (isWx) sock.close({}); else sock.close(); }
     } catch (e) {}
     sock = null;
+    if (wasOpen) fire('close'); // 手动断开也要给上层一个明确的收尾信号
   }
 
   var NET = {

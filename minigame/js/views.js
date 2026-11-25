@@ -1654,7 +1654,12 @@
     if (S.lobby.kind === 'entry') {
       txt(ctx, '联机对战', W / 2, py + 56, 28, C.gold, 'center', 600);
       txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', W / 2, py + 88, 14, C.dim);
-      txt(ctx, '服务器 ' + (S.lobby.url || ''), W / 2, py + 112, 13, C.dim);
+      var srv = String(S.lobby.url || '');
+      var srvW = Math.min(pw - 80, Math.max(240, (srv.length + 3) * 7.4));
+      var srvX = (W - srvW) / 2;
+      box(ctx, srvX, py + 100, srvW, 32, 16, C.btn, C.panelLine);
+      txt(ctx, '服务器 ' + srv, W / 2, py + 121, 12.5, C.gold, 'center');
+      hits.push({ x: srvX, y: py + 100, w: srvW, h: 32, act: 'netServer' });
 
       var by = py + 168;
       box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
