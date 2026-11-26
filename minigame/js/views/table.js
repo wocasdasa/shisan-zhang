@@ -229,6 +229,18 @@ module.exports = function (B) {
     if (lone) {
       txt(ctx, '独食', rect.x + rect.w - 8, rect.y + 12, 11, '#e8b0ae', 'right', 700);
     }
+    // 队友提示：联机由服务端按房规下发 team；单机在这里按「关闭/出牌后/常显」自己算
+    var showMate = false;
+    if (S.mode === 'online') {
+      showMate = !!(S.seats && S.seats[p] && S.seats[p].team === 0 && p !== 0);
+    } else if (g && g.camp && g.camp.mode === 'team') {
+      var th = (S.roomCfg && S.roomCfg.teamHint) || 'none';
+      var anyReveal = g.players.some(function (pl) { return pl.revealedCards && pl.revealedCards.length; });
+      if (p !== 0 && (th === 'always' || (th === 'reveal' && anyReveal))) {
+        showMate = g.camp.teamA.indexOf(p) >= 0 === g.camp.teamA.indexOf(0) >= 0;
+      }
+    }
+    if (showMate) txt(ctx, '队友', rect.x + rect.w - 8, rect.y + 12, 11, C.gold, 'right', 700);
 
     // 身份标记：黑金圆徽（♠3/♠A），南家在牌上方、其余在牌下方
     var br = 12, bn = rc.length;
@@ -253,8 +265,14 @@ module.exports = function (B) {
       if (p === 0 && S.phase === 'tribute') continue; // 进贡面板会盖住南家座位
       var rect = L.seats[SEAT_POS[p]];
       seatPlate(ctx, S, p, rect, hits);
+      // 联机只有当前轮到的那位胜方能抽（2v2 两名真人胜方时，不轮到的别亮金框；
+      // 服务端 drawingSeat!==seat 会静默丢弃，亮框只会让人以为点了没反应）
+      var TR0 = S.tribute;
+      var fullSeat = !!(TR0 && TR0.pairQuota && TR0.plan && TR0.plan.winners &&
+        TR0.plan.winners.length === 1 && ((TR0.drawnFrom || {})[p] || 0) >= TR0.pairQuota);
       var pickable = S.tribute && S.tribute.stage === 'draw' && S.tribute.humanIsWinner &&
-        S.tribute.plan.losers.indexOf(p) >= 0;
+        S.tribute.plan.losers.indexOf(p) >= 0 && !fullSeat &&
+        (state.mode !== 'online' || S.tribute.myTurn);
       if (pickable) {
         ctx.save();
         ctx.setLineDash([6, 4]);
@@ -281,8 +299,11 @@ module.exports = function (B) {
               ctx.restore();
             }
           }
-          var isTurn = TR.turnW === p;
-          var canPick = TR.stage === 'draw' && (TR.canDraw || []).indexOf(p) >= 0;
+          // 服务端不下发 turnWRel/picks：联机时“当前抽牌者”就是本端自己（p0 不进这段循环），
+          // 因此不能再用 turnW 判断，否则所有可抽座位会一直挂着“点我抽牌”
+          var isTurn = state.mode === 'online' ? false : TR.turnW === p;
+          var canPick = TR.stage === 'draw' && (TR.canDraw || []).indexOf(p) >= 0 && !fullSeat &&
+            (state.mode !== 'online' || TR.myTurn);
           var wasPicked = (TR.picks || []).indexOf(p) >= 0;
           if (isTurn) {
             var pulse = 0.45 + 0.45 * Math.sin(Date.now() / 300);

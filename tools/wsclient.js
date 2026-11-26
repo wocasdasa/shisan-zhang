@@ -50,6 +50,7 @@ class Client extends EventEmitter {
         this.drain();
       });
       socket.on('close', () => this.emit('close'));
+      socket.on('error', (e) => this.emit('error', e));
       this.emit('open');
     });
     req.on('error', (e) => this.emit('error', e));

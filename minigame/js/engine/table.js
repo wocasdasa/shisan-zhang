@@ -21,26 +21,26 @@
     }); });
 
     var camp = Camp.analyze(hands);
-    var first = opt.firstPlayer;
-    if (first === undefined || first === null || first < 0) {
+    // 先出权：显式传入（进贡「被抽最大牌的原主人」）优先；没传才按 ♦4 找
+    var first;
+    var explicitFirst = (opt.firstPlayer !== undefined && opt.firstPlayer !== null && opt.firstPlayer >= 0);
+    if (explicitFirst) {
+      first = opt.firstPlayer % SEATS;
+    } else {
       first = 0;
       for (var p = 0; p < SEATS; p++) {
         if (Moves.containsCard(hands[p], 4, 0)) { first = p; break; }   // 方块4
       }
     }
-
-    var camp = Camp.analyze(hands);
-    var first = 0;
-    for (var p = 0; p < SEATS; p++) {
-      if (Moves.containsCard(hands[p], 4, 0)) { first = p; break; }   // 方块4
-    }
+    // 进贡局由被抽者先出时，不再要求首手带 ♦4；正常开局仍要求
+    var firstPending = explicitFirst ? false : cfg.requireFirstCard;
 
     var game = {
       cfg: cfg, seed: seed, camp: camp,
       players: hands.map(function (h, i) { return { id: i, hand: h, revealed: false }; }),
       turn: first, combo: null, comboOwner: -1, lastPlayer: -1,
       passes: {}, ranks: [], finishedCount: 0, over: false,
-      firstPlayPending: cfg.requireFirstCard,
+      firstPlayPending: firstPending,
       trickPlays: [],
       history: [], turnCount: 0, violations: []
     };

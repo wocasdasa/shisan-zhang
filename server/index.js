@@ -46,12 +46,47 @@ const aiSeats = new Map(); // roomId -> Set(seat)
 
 let roomSeq = 1000;
 
+// 4 位房间号：随机且不与现有房间冲突（顺序号可被枚举，陌生人能猜到房号进来）
 function newRoomId() {
-  const id = String(roomSeq++);
-  return id.slice(-4);
+  for (let i = 0; i < 200; i++) {
+    const id = String(1000 + Math.floor(Math.random() * 9000));
+    if (!rooms.has(id)) return id;
+  }
+  const id = String(1000 + (roomSeq++ % 9000));
+  return rooms.has(id) ? String(9999 - (roomSeq % 100)) : id;
+}
+
+// 客户端建房的规则配置：只接受白名单值，其余落回默认（此前整包被忽略）
+function roomSettings(msg) {
+  const cfg = GX.Rules.resolve();
+  const rc = (msg && typeof msg.cfg === 'object' && msg.cfg) ? msg.cfg : {};
+  const tier = ['heavy', 'light', 'off'].indexOf(rc.tributeTier) >= 0 ? rc.tributeTier : 'heavy';
+  cfg.tributeEnabled = tier !== 'off';
+  cfg.tributeTier = tier === 'off' ? 'heavy' : tier;
+  const sec = [15, 20, 30].indexOf(Number(rc.turnSeconds)) >= 0 ? Number(rc.turnSeconds) : 20;
+  cfg.turnSeconds = sec;
+  cfg.teamHint = ['none', 'reveal', 'always'].indexOf(rc.teamHint) >= 0 ? rc.teamHint : 'none';
+  cfg.testTribute = !!rc.testTribute;   // 测试开关：第 1 局也走一次进贡（默认关）
+  return { cfg, turnMs: sec * 1000 };
 }
 
 function send(conn, obj) { if (conn) conn.send(obj); }
+
+// 客户端传来的牌：必须是数组、每项是 {r,s} 且数值合法；否则一律当畸形请求拒绝
+function cardList(v, maxLen) {
+  const cap = maxLen || 8;
+  if (!Array.isArray(v) || v.length > cap) return null;
+  const out = [];
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (!c || typeof c !== 'object') return null;
+    const r = Number(c.r), s = Number(c.s);
+    if (!Number.isInteger(r) || r < 2 || r > 14) return null;
+    if (!Number.isInteger(s) || s < 0 || s > 3) return null;
+    out.push({ r, s });
+  }
+  return out;
+}
 
 function roomPlayers(room) {
   return room.seats.filter(Boolean);
@@ -78,6 +113,10 @@ function broadcast(room) {
 function viewFor(room, viewer) {
   const g = room.game;
   const rel = (s) => (s - viewer + 4) % 4;
+  const camp = g ? g.camp : null;
+  const anyReveal = !!(g && g.players.some((p) => (p.revealedCards || []).length > 0));
+  const showTeam = !!(camp && camp.mode === 'team' &&
+    (room.cfg.teamHint === 'always' || (room.cfg.teamHint === 'reveal' && anyReveal)));
 
   const seats = [0, 1, 2, 3].map((r) => {
     const seat = (viewer + r) % 4;
@@ -91,7 +130,8 @@ function viewFor(room, viewer) {
       count: gp ? gp.hand.length : 0,
       revealedCards: gp ? (gp.revealedCards || []) : [],
       score: room.scores[seat] || 0,
-      online: !!(p && p.connId)
+      online: !!(p && p.connId),
+      team: showTeam ? (GX.Camp.teamOf(camp, seat) === GX.Camp.teamOf(camp, viewer) ? 0 : 1) : undefined
     };
   });
 
@@ -115,28 +155,44 @@ function viewFor(room, viewer) {
     host: room.hostSeat === viewer,
     canStart: room.phase === 'wait' && room.hostSeat === viewer && humanCount(room) >= 1,
     lastEvent: room.lastEvent || '',
+    // 房主设定的规则（客户端等待厅要用它显示；此前只有建房的人自己知道）
+    cfg: {
+      tributeTier: room.cfg.tributeEnabled ? room.cfg.tributeTier : 'off',
+      turnSeconds: Math.round((room.turnMs || TURN_MS) / 1000),
+      teamHint: room.cfg.teamHint,
+      testTribute: !!room.cfg.testTribute
+    },
     chat: (room.chat || []).slice(-10).map((c) => ({
       rel: rel(c.seat), kind: c.kind, text: c.text, ts: c.ts
     }))
   };
 
   if (room.summary) view.summary = { scores: [0, 1, 2, 3].map((r) => room.scores[(viewer + r) % 4]) };
-
   if (room.tribute) {
     const T = room.tribute;
     view.tribute = {
       stage: T.stage,
       count: T.plan.count,
       winnerRanks: (T.plan.winnerRanks || []).map((x) => x),
-      draws: T.draws.map((d) => ({ from: rel(d.from), card: d.card })),
+      draws: T.draws.map((d) => ({ from: rel(d.from), to: rel(d.to), card: d.card })),
       reveals: T.reveals.map((v) => ({ owner: rel(v.owner), card: v.card })),
       log: T.log.slice(-6),
       need: T.stage === 'return' ? (T.drawsDone[viewer] || 0) : 0,
+      // 抽牌阶段我还差几张（客户端要显示“还差 X 张”，否则连点座位没有进度感）
+      drawNeed: T.stage === 'draw' && T.needFor ? Math.max(0, T.needFor(viewer)) : 0,
       myTurnToDraw: T.stage === 'draw' && room.tribute && room.tribute.drawingSeat === viewer,
       canDraw: (T.plan.losers || []).map((s) => rel(s)),
       winnersRel: (T.plan.winners || []).map((s) => rel(s)),
+      // 我（胜方）已经抽过的败方座位（相对）：桌面给这些座位画“已抽”角标
+      picks: (T.draws || []).filter((d) => d.to === viewer).map((d) => rel(d.from))
+        .filter((v, i, a) => a.indexOf(v) === i),
       pairQuota: T.pairQuota || null,
-      pulledFrom: T.drawnFrom || {}
+      pulledFrom: Object.keys(T.drawnFrom || {}).reduce((o, s) => {
+        o[rel(Number(s))] = T.drawnFrom[s];
+        return o;
+      }, {}),
+      // 显式标记键口径，客户端据此决定是否直接采用（老服务端/云函数没有这个标记就退回按 draws 计）
+      pulledFromRel: true
     };
   }
 
@@ -146,7 +202,8 @@ function viewFor(room, viewer) {
       mode: R.camp.mode,
       loneRel: R.camp.mode === 'lone' ? rel(R.camp.lone) : -1,
       ranks: R.ranks.map((s) => rel(s)),
-      scores: R.ranks.map((s) => R.scores[s]),
+      // 客户端一律按「相对座位」取值（scores[0] 就是自己的本局得分），不能按名次顺序发
+      scores: [0, 1, 2, 3].map((r) => R.scores[(viewer + r) % 4]),
       winRanks: R.winRanks || [],
       teamA: (R.camp.teamA || []).map((s) => rel(s)),
       teamB: (R.camp.teamB || []).map((s) => rel(s))
@@ -161,13 +218,18 @@ function setEvent(room, text) { room.lastEvent = text; }
 // ---------- 房间 ----------
 function createRoom(conn, msg) {
   if (rooms.size >= MAX_ROOMS) { send(conn, { t: 'err', msg: '服务器房间已满，稍后再试' }); return; }
+  // 已在别的房间：先退掉旧房，避免旧座位残留成「幽灵真人」永久占房
+  const old = conns.get(conn.id);
+  if (old && old.roomId && rooms.has(old.roomId)) leaveRoom(conn, true);
   const id = newRoomId();
+  const st = roomSettings(msg);
   const room = {
     id,
     hostSeat: 0,
     seats: new Array(4).fill(null),
     rounds: [8, 12, 16, 24, 32].indexOf(msg.rounds) >= 0 ? msg.rounds : 8,
-    cfg: GX.Rules.resolve(),
+    cfg: st.cfg,
+    turnMs: st.turnMs,
     phase: 'wait',
     round: 0,
     scores: [0, 0, 0, 0],
@@ -190,7 +252,15 @@ function createRoom(conn, msg) {
 function joinRoom(conn, msg) {
   const room = rooms.get(String(msg.room || '').trim());
   if (!room) { send(conn, { t: 'err', msg: '房间不存在' }); return; }
+  const old = conns.get(conn.id);
+  // 已经在这个房间：不能再占第二个座位（同一条 socket 会收到两份 state，且一个座位会漏回收）
+  if (old && old.roomId === room.id) { send(conn, { t: 'err', msg: '你已在这个房间' }); return; }
+  // 先校验目标房能否进，再退旧房：否则目标房已开局/已满时玩家会白白丢掉原来的座位
   if (room.phase !== 'wait') { send(conn, { t: 'err', msg: '这局已经开始了' }); return; }
+  if (!room.seats.some((s) => !s)) { send(conn, { t: 'err', msg: '房间满了' }); return; }
+  if (old) {
+    if (rooms.has(old.roomId)) leaveRoom(conn, true);
+  }
   const seat = room.seats.findIndex((s) => !s);
   if (seat < 0) { send(conn, { t: 'err', msg: '房间满了' }); return; }
   onJoin(conn, room, msg.name, seat);
@@ -203,6 +273,8 @@ function onJoin(conn, room, name, seat) {
   room.seats[seat] = {
     name: info.name, connId: conn.id, ready: false, ai: false, key, droppedAt: 0
   };
+  // 房主位没人（例如房主刚退、座位空出来后有人补位）：补位者接任房主
+  if (room.hostSeat < 0 || !room.seats[room.hostSeat]) room.hostSeat = seat;
   setEvent(room, info.name + ' 加入房间');
   send(conn, { t: 'joined', room: room.id, seat, key });
   broadcast(room);
@@ -221,6 +293,28 @@ function rejoinRoom(conn, msg) {
   if (!room) { send(conn, { t: 'err', msg: '房间已解散' }); return; }
   const seat = room.seats.findIndex((s) => s && !s.ai && s.key && s.key === String(msg.key || ''));
   if (seat < 0) { send(conn, { t: 'err', msg: '座位已失效（超时被接管或已离桌）' }); return; }
+  const oldInfo = conns.get(conn.id);
+  if (oldInfo) {
+    // 同一条连接已经在这个房间的另一个座位：不允许一脚踩两座；否则旧座位会变成收不到广播的幽灵真人
+    if (oldInfo.roomId === room.id && oldInfo.seat !== seat) {
+      send(conn, { t: 'err', msg: '你已在这个房间' });
+      return;
+    }
+    // 从别的房间直接 rejoin：先正常退旧房，避免旧房留下 connId 指向已改绑的幽灵座位
+    if (oldInfo.roomId !== room.id && rooms.has(oldInfo.roomId)) leaveRoom(conn, true);
+  }
+  const prev = room.seats[seat].connId;
+  if (prev && prev !== conn.id) {
+    // 旧连接还活着：先摘掉它的房间映射再关闭，否则它的 close 回调会把这个座位当成「掉线」甚至清掉
+    const oi = conns.get(prev);
+    conns.delete(prev);
+    if (oi && oi.conn) {
+      // 告诉旧端「座位已被接管」：否则旧端会把这次被动断开当成掉线并自动重连，
+      // 两个客户端拿着同一把 key 互相踢，形成无限重连战争
+      try { send(oi.conn, { t: 'superseded', msg: '座位已在另一处登录' }); } catch (e) {}
+      try { oi.conn.close(); } catch (e) {}
+    }
+  }
   const info = { conn, roomId: room.id, seat, name: room.seats[seat].name, key: room.seats[seat].key };
   conns.set(conn.id, info);
   room.seats[seat].connId = conn.id;
@@ -231,7 +325,7 @@ function rejoinRoom(conn, msg) {
 }
 
 // 掉线：对局中先保留座位 90 秒（期间轮到他由超时逻辑代打），超时转 AI
-const DROP_GRACE_MS = 90000;
+const DROP_GRACE_MS = Number(process.env.DROP_GRACE_MS || 90000);
 
 // 房主走了但还有人在线：把房主交给下一位真人；没有真人则清空 hostSeat
 function ensureHost(room) {
@@ -308,7 +402,8 @@ function dissolveRoom(conn) {
 // 宽限期到：掉线座位交给 AI 托管，后续轮次不再等 20 秒
 setInterval(function () {
   rooms.forEach(function (room) {
-    if (room.phase !== 'play' && room.phase !== 'tribute' && room.phase !== 'deal' && room.phase !== 'settle') return;
+    // summary 也要回收：全场结束时房主掉线，若不转交房主，其他人永远点不了「再来一场」
+    if (room.phase !== 'play' && room.phase !== 'tribute' && room.phase !== 'deal' && room.phase !== 'settle' && room.phase !== 'summary') return;
     let changed = false;
     room.seats.forEach(function (s) {
       if (!s || s.ai || s.connId) return;
@@ -319,7 +414,16 @@ setInterval(function () {
       changed = true;
     });
     if (changed) {
+      // 房主也在这一轮被托管了：必须把房主交给还在线的真人，否则结算后没人能点「下一局」
+      ensureHost(room);
       broadcast(room);
+      // 宽限期也过了、一个真人都不剩：没必要让 4 个机器人替空房打完整场（白烧 CPU、白占房间名额）
+      if (humanCount(room) === 0) {
+        clearTimer(room);
+        rooms.delete(room.id);
+        if (DBG) console.log('[gc] 房间 ' + room.id + ' 已无真人，回收');
+        return;
+      }
       if (room.phase === 'play' && room.game && !room.game.over) {
         const t = room.game.turn;
         if (room.seats[t] && room.seats[t].ai) scheduleTurn(room);
@@ -368,8 +472,12 @@ function newRound(room) {
 function afterDeal(room) {
   clearTimer(room);
   room.deadline = 0;
-  if (room.round >= 2 && room.cfg.tributeEnabled && room.lastResult) {
-    const plan = GX.Tribute.plan(room.lastResult, room.cfg);
+  if ((room.round >= 2 || room.cfg.testTribute) && room.cfg.tributeEnabled) {
+    // 开局即进贡（测试开关）：第 1 局没有上一局结果，就按「座位 0/1/2/3 依次第 1~4 名」
+    // 和本局分好的阵营造一个假结果，让进贡链路可以直接演练
+    const base = room.lastResult ||
+      (room.round === 1 && room.cfg.testTribute ? { camp: room.game.camp, ranks: [0, 1, 2, 3] } : null);
+    const plan = base ? GX.Tribute.plan(base, room.cfg) : { skip: true, count: 0 };
     if (!plan.skip && plan.count > 0) {
       room.tribute = {
         plan: plan,
@@ -408,6 +516,10 @@ function startPlayAfterTribute(room, leadSeat) {
   if (leadSeat !== undefined && leadSeat !== null && leadSeat >= 0) {
     room.game.turn = leadSeat;
     room.game.firstPlayPending = false;
+  } else {
+    // 没抽到牌（理论上不该发生）：保留 createRound 定的 ♦4 先出，别把 turn 设成 -1 让整桌卡死
+    room.game.turn = room.game.turn >= 0 ? room.game.turn : 0;
+    room.game.firstPlayPending = !!room.cfg.requireFirstCard;
   }
   startPlay(room);
 }
@@ -547,10 +659,15 @@ function tributeDrawOne(room, winner, loser) {
     const idx = Math.floor(Math.random() * hand.length);
     const card = hand[idx];
     if (GX.Tribute.isIdentity(card)) {
-      T.reveals.push({ owner: loser, card });
+      // 同一张身份牌可能被随机抽到多次：只公示/记录一次，避免日志刷屏和座位重复画徽标
+      const seen = (T.reveals || []).some((r) => r.owner === loser && r.card.r === card.r && r.card.s === card.s);
+      if (!seen) {
+        T.reveals.push({ owner: loser, card });
+        T.log.push({ text: playerName(room, loser) + ' 的 ' + cardName(card) + ' 是身份牌，亮出归还后重抽', kind: 'warn' });
+      }
       g.players[loser].revealed = true;
-      g.players[loser].revealedCards = (g.players[loser].revealedCards || []).concat([card.r]);
-      T.log.push({ text: playerName(room, loser) + ' 的 ' + cardName(card) + ' 是身份牌，亮出归还后重抽', kind: 'warn' });
+      const rc = g.players[loser].revealedCards = g.players[loser].revealedCards || [];
+      if (rc.indexOf(card.r) < 0) rc.push(card.r);
       continue;
     }
     hand.splice(idx, 1);
@@ -648,8 +765,9 @@ function clearTimer(room) {
 
 function armTributeTimer(room, fn) {
   clearTimer(room);
-  room.deadline = Date.now() + TURN_MS;
-  room.timer = setTimeout(fn, TURN_MS);
+  const ms = room.turnMs || TURN_MS;
+  room.deadline = Date.now() + ms;
+  room.timer = setTimeout(fn, ms);
 }
 
 function scheduleTurn(room) {
@@ -660,12 +778,13 @@ function scheduleTurn(room) {
   const isAI = room.seats[seat] && room.seats[seat].ai;
   if (DBG) console.log('[R' + room.round + '] 轮到 seat ' + seat + (isAI ? '(AI)' : '(人)') +
     ' 桌面' + (g.combo ? '有牌' : '为空') + ' 手牌数' + g.players.map((p) => p.hand.length).join('/'));
+  const ms = (room && room.turnMs) || TURN_MS;
   if (isAI) {
     room.timer = setTimeout(() => aiAct(room, seat), 780);
     room.deadline = 0;
   } else {
-    room.deadline = Date.now() + TURN_MS;
-    room.timer = setTimeout(() => humanTimeout(room, seat), TURN_MS);
+    room.deadline = Date.now() + ms;
+    room.timer = setTimeout(() => humanTimeout(room, seat), ms);
   }
   broadcast(room);
 }
@@ -795,7 +914,8 @@ function handle(conn, msg) {
     if (room.phase !== 'play') return;
     const g = room.game;
     if (!g || g.over || g.turn !== seat) { send(conn, { t: 'err', msg: '还没轮到你' }); return; }
-    const cards = (msg.cards || []).map((c) => ({ r: c.r, s: c.s }));
+    const cards = cardList(msg.cards);
+    if (!cards) { send(conn, { t: 'err', msg: '出牌数据不合法' }); return; }
     if (!cards.length) return;
     const err = GX.Table.validate(g, seat, cards);
     if (err) { send(conn, { t: 'err', msg: errText(err) }); return; }
@@ -817,6 +937,12 @@ function handle(conn, msg) {
   }
 
   if (msg.t === 'next') {
+    // 打满局数后的总结页：房主点「再来一局」直接重开一场（同房同座）
+    if (room.phase === 'summary') {
+      if (room.hostSeat !== seat) { send(conn, { t: 'err', msg: '等房主开下一局' }); return; }
+      startRoom(room);
+      return;
+    }
     if (room.phase !== 'settle') return;
     if (room.hostSeat !== seat) { send(conn, { t: 'err', msg: '等房主开下一局' }); return; }
     nextRound(room);
@@ -848,11 +974,20 @@ function handle(conn, msg) {
     // 独食被抽方向逐家交错：只有当前轮次的胜方可还贡
     if (isLoneInterleave(T) && T.plan.winners[T.turnIdx] !== seat) return;
     const g = room.game;
-    const cards = msg.cards || [];
+    // 独食进贡要一次还 12 张（3 家各 4 张），上限不能按出牌的最多 8 张
+    const cards = cardList(msg.cards, 13);
+    if (!cards) { send(conn, { t: 'err', msg: '还贡数据不合法' }); return; }
     const need = T.drawsDone[seat] || 0;
     const picked = cards.filter((c, i, arr) =>
       arr.findIndex((x) => x.r === c.r && x.s === c.s) === i);
     if (picked.length !== need) { send(conn, { t: 'err', msg: '要还 ' + need + ' 张' }); return; }
+    if (picked.some((c) => GX.Tribute.isIdentity(c))) {
+      send(conn, { t: 'err', msg: '身份牌不能还贡' }); return;
+    }
+    // 必须都在自己手里，且不能重复扣同一张（picked 已去重，这里只验存在性）
+    if (picked.some((c) => !g.players[seat].hand.some((x) => x.r === c.r && x.s === c.s))) {
+      send(conn, { t: 'err', msg: '还贡的牌不在手里' }); return;
+    }
     picked.forEach((c) => {
       const i = g.players[seat].hand.findIndex((x) => x.r === c.r && x.s === c.s);
       if (i < 0) return;
@@ -911,7 +1046,10 @@ const server = WS.createServer(PORT, (conn) => {
       conn.close();
       return;
     }
-    handle(conn, msg);
+    try { handle(conn, msg); } catch (e) {
+      console.error('[msg] 处理 ' + (msg && msg.t) + ' 时异常：' + (e && e.stack ? e.stack : e));
+      send(conn, { t: 'err', msg: '服务器处理失败' });
+    }
   });
   conn.on('close', () => { liveConns.delete(conn); leaveRoom(conn); });
   send(conn, { t: 'hello', server: 'guangxi13', turnMs: TURN_MS });

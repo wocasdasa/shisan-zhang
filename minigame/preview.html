@@ -669,26 +669,26 @@ define("js/engine/table.js", function (require, module, exports) {
     }); });
 
     var camp = Camp.analyze(hands);
-    var first = opt.firstPlayer;
-    if (first === undefined || first === null || first < 0) {
+    // 先出权：显式传入（进贡「被抽最大牌的原主人」）优先；没传才按 ♦4 找
+    var first;
+    var explicitFirst = (opt.firstPlayer !== undefined && opt.firstPlayer !== null && opt.firstPlayer >= 0);
+    if (explicitFirst) {
+      first = opt.firstPlayer % SEATS;
+    } else {
       first = 0;
       for (var p = 0; p < SEATS; p++) {
         if (Moves.containsCard(hands[p], 4, 0)) { first = p; break; }   // 方块4
       }
     }
-
-    var camp = Camp.analyze(hands);
-    var first = 0;
-    for (var p = 0; p < SEATS; p++) {
-      if (Moves.containsCard(hands[p], 4, 0)) { first = p; break; }   // 方块4
-    }
+    // 进贡局由被抽者先出时，不再要求首手带 ♦4；正常开局仍要求
+    var firstPending = explicitFirst ? false : cfg.requireFirstCard;
 
     var game = {
       cfg: cfg, seed: seed, camp: camp,
       players: hands.map(function (h, i) { return { id: i, hand: h, revealed: false }; }),
       turn: first, combo: null, comboOwner: -1, lastPlayer: -1,
       passes: {}, ranks: [], finishedCount: 0, over: false,
-      firstPlayPending: cfg.requireFirstCard,
+      firstPlayPending: firstPending,
       trickPlays: [],
       history: [], turnCount: 0, violations: []
     };
@@ -3262,6 +3262,18 @@ module.exports = function (B) {
     if (lone) {
       txt(ctx, '独食', rect.x + rect.w - 8, rect.y + 12, 11, '#e8b0ae', 'right', 700);
     }
+    // 队友提示：联机由服务端按房规下发 team；单机在这里按「关闭/出牌后/常显」自己算
+    var showMate = false;
+    if (S.mode === 'online') {
+      showMate = !!(S.seats && S.seats[p] && S.seats[p].team === 0 && p !== 0);
+    } else if (g && g.camp && g.camp.mode === 'team') {
+      var th = (S.roomCfg && S.roomCfg.teamHint) || 'none';
+      var anyReveal = g.players.some(function (pl) { return pl.revealedCards && pl.revealedCards.length; });
+      if (p !== 0 && (th === 'always' || (th === 'reveal' && anyReveal))) {
+        showMate = g.camp.teamA.indexOf(p) >= 0 === g.camp.teamA.indexOf(0) >= 0;
+      }
+    }
+    if (showMate) txt(ctx, '队友', rect.x + rect.w - 8, rect.y + 12, 11, C.gold, 'right', 700);
 
     // 身份标记：黑金圆徽（♠3/♠A），南家在牌上方、其余在牌下方
     var br = 12, bn = rc.length;
@@ -3286,8 +3298,14 @@ module.exports = function (B) {
       if (p === 0 && S.phase === 'tribute') continue; // 进贡面板会盖住南家座位
       var rect = L.seats[SEAT_POS[p]];
       seatPlate(ctx, S, p, rect, hits);
+      // 联机只有当前轮到的那位胜方能抽（2v2 两名真人胜方时，不轮到的别亮金框；
+      // 服务端 drawingSeat!==seat 会静默丢弃，亮框只会让人以为点了没反应）
+      var TR0 = S.tribute;
+      var fullSeat = !!(TR0 && TR0.pairQuota && TR0.plan && TR0.plan.winners &&
+        TR0.plan.winners.length === 1 && ((TR0.drawnFrom || {})[p] || 0) >= TR0.pairQuota);
       var pickable = S.tribute && S.tribute.stage === 'draw' && S.tribute.humanIsWinner &&
-        S.tribute.plan.losers.indexOf(p) >= 0;
+        S.tribute.plan.losers.indexOf(p) >= 0 && !fullSeat &&
+        (state.mode !== 'online' || S.tribute.myTurn);
       if (pickable) {
         ctx.save();
         ctx.setLineDash([6, 4]);
@@ -3314,8 +3332,11 @@ module.exports = function (B) {
               ctx.restore();
             }
           }
-          var isTurn = TR.turnW === p;
-          var canPick = TR.stage === 'draw' && (TR.canDraw || []).indexOf(p) >= 0;
+          // 服务端不下发 turnWRel/picks：联机时“当前抽牌者”就是本端自己（p0 不进这段循环），
+          // 因此不能再用 turnW 判断，否则所有可抽座位会一直挂着“点我抽牌”
+          var isTurn = state.mode === 'online' ? false : TR.turnW === p;
+          var canPick = TR.stage === 'draw' && (TR.canDraw || []).indexOf(p) >= 0 && !fullSeat &&
+            (state.mode !== 'online' || TR.myTurn);
           var wasPicked = (TR.picks || []).indexOf(p) >= 0;
           if (isTurn) {
             var pulse = 0.45 + 0.45 * Math.sin(Date.now() / 300);
@@ -3650,18 +3671,26 @@ module.exports = function (B) {
     var retFrom = (T.ret && typeof T.ret.curFrom === 'number') ? T.ret.curFrom
       : ((T.retQueue && T.retQueue[T.retIdx]) ? T.retQueue[T.retIdx].from : -1);
     var prog = '进贡完成';
-    if (T.stage === 'draw') prog = T.humanIsWinner ? '点金框的对手抽牌' : '等待对手抽牌';
+    if (T.stage === 'draw') prog = T.humanIsWinner
+      ? ('点金框的对手抽牌' + (T.drawNeed ? '（还差 ' + T.drawNeed + ' 张）' : ''))
+      : '等待对手抽牌';
     else if (T.stage === 'pull') prog = '点牌背抽牌（' + ((T.pull && T.pull.done) || 0) + '/' + cnt + '）';
     else if (T.stage === 'return') {
-      prog = '还贡 ' + Math.min(retIdx + 1, retTotal) + '/' + retTotal + ' → 还给 ' + (retFrom >= 0 ? SEAT_NAMES[retFrom] : '')
-        + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : '');
+      if (state.mode === 'online') {
+        prog = (T.need || 0) > 0
+          ? ('选 ' + T.need + ' 张还贡' + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : ''))
+          : '等待对方还贡';
+      } else {
+        prog = '还贡 ' + Math.min(retIdx + 1, retTotal) + '/' + retTotal + ' → 还给 ' + (retFrom >= 0 ? SEAT_NAMES[retFrom] : '')
+          + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : '');
+      }
     }
 
     txt(ctx, '第 ' + S.round + ' 局 · 进贡', barX + 16, barY + barH / 2, 15, C.gold, 'left', 600);
     txt(ctx, prog, barX + barW / 2 - 40, barY + barH / 2, 15, C.text, 'center', 600);
 
     // 还贡按钮（做出牌那种胶囊）：勾选完点这里才提交
-    if (T.stage === 'return') {
+    if (T.stage === 'return' && !(state.mode === 'online' && (T.need || 0) === 0)) {
       var selN = (S.selected || []).length;
       var bww = 148, bhh = 32;
       var bxx = barX + barW - bww - 8, byy = barY + (barH - bhh) / 2;
@@ -5299,6 +5328,7 @@ define("js/app.js", function (require, module, exports) {
         tryReconnect();
         return;
       }
+      if (S.leaving) { P.markDirty(); return; }   // 主动退房/回大厅：不要弹“连接断开”盖住操作提示
       toast('连接断开');
       P.markDirty();
     });
@@ -5377,11 +5407,16 @@ define("js/app.js", function (require, module, exports) {
   }
 
   function backToSolo() {
+    var alreadyLeaving = S.leaving;
     S.leaving = true;
     S.reconnecting = false;
     S.rejoin = null;
     try { storageSet('gx13_rejoin', null); } catch (e) {}
-    if (S.mode === 'online') { NET.send({ t: 'leave' }); NET.close(); }
+    if (S.mode === 'online') {
+      // 被服务端“另一处登录”顶掉时房间映射已失效，再发 leave 只会收到「还没进房间」
+      if (!alreadyLeaving) NET.send({ t: 'leave' });
+      NET.close();
+    }
     SFX.flush();
     S.mode = 'solo';
     S.lobby = null;
@@ -5393,6 +5428,11 @@ define("js/app.js", function (require, module, exports) {
     S.seats = [];
     S.game = null;
     S.phase = 'menu';
+    S.summary = false;
+    S.lastResult = null;
+    S.deal = null;
+    S.tribute = null;
+    S.selected = [];
     P.markDirty();
   }
 
@@ -5433,7 +5473,39 @@ define("js/app.js", function (require, module, exports) {
       P.markDirty();
       return;
     }
+    if (m.t === 'superseded') {
+      // 同一把重连 key 在另一处登录：服务端接管了座位，这里不能再自动重连，否则两边互踢
+      S.reconnecting = false;
+      S.reconnectTries = 0;
+      S.rejoin = null;
+      try { storageSet('gx13_rejoin', null); } catch (e) {}
+      if (S.mode === 'online') {
+        S.leaving = true;      // 房间映射已被服务端摘掉，backToSolo 不必再发 leave
+        backToSolo();
+        openLobby();
+        S.lobby.err = m.msg || '座位已在另一处登录';
+        toast('座位已在另一处登录，本机已退出房间');
+      }
+      P.markDirty();
+      return;
+    }
     if (m.t === 'err') {
+      // 重连被拒（座位已被 AI 接管/房间已解散）：别把玩家晾在过期的牌桌上，
+      // 清掉重连凭据回联机大厅，重新建房或进房
+      if (S.reconnecting && S.rejoin) {
+        S.reconnecting = false;
+        S.reconnectTries = 0;
+        S.rejoin = null;
+        try { storageSet('gx13_rejoin', null); } catch (e) {}
+        if (S.mode === 'online') {
+          backToSolo();
+          openLobby();
+          S.lobby.err = m.msg || '座位已失效';
+          toast('座位已失效，请重新进房');
+          P.markDirty();
+          return;
+        }
+      }
       if (S.lobby) S.lobby.err = m.msg;
       else toast(m.msg);
       P.markDirty();
@@ -5577,10 +5649,14 @@ define("js/app.js", function (require, module, exports) {
 
     if (v.phase === 'tribute' && v.tribute) {
       var T = v.tribute;
-      // 联机配额映射：server/云函数广播的 pulledFrom 以绝对座位为键，客户端不知自身
-      // 绝对座位无法换算 rel，故从 draws（from 已是 rel，身份牌亮还不入 draws）逐家计数
+      // 配额映射：服务端 pulledFrom 已统一为相对座位键（含身份牌亮出后的重抽），
+      // 只有带 pulledFromRel 标记才直接用；老服务端/云函数（绝对座位键或没有该字段）退回按 draws 计
       var drawnFrom = {};
-      (T.draws || []).forEach(function (d) { drawnFrom[d.from] = (drawnFrom[d.from] || 0) + 1; });
+      if (T.pulledFromRel && T.pulledFrom) {
+        Object.keys(T.pulledFrom).forEach(function (k) { drawnFrom[k] = T.pulledFrom[k]; });
+      } else {
+        (T.draws || []).forEach(function (d) { drawnFrom[d.from] = (drawnFrom[d.from] || 0) + 1; });
+      }
       var pairQuota = (typeof T.pairQuota === 'number') ? T.pairQuota : null;
       var pull = T.pull || null;
       if (pull && pull.rows && pairQuota != null) {
@@ -5593,12 +5669,15 @@ define("js/app.js", function (require, module, exports) {
         log: (T.log || []).slice(-6),
         shares: [],
         need: T.need || 0,
+        drawNeed: T.drawNeed || 0,
         stage: T.stage || 'draw',
         canDraw: T.canDraw || [],
         pull: pull,
         pairQuota: pairQuota,
         drawnFrom: drawnFrom,
-        ret: T.ret || null,
+        // 联机还贡：服务端按 need 下发剩余张数，没有 retQueue；补一个最小 ret 结构给
+        // retRemaining()/状态条用（此前 retRemaining 恒 0，勾牌直接被“只剩 0 张”拦住）
+        ret: T.stage === 'return' ? (T.ret || { total: T.need || 0, idx: 0, curFrom: -1 }) : (T.ret || null),
         targetRel: (typeof T.targetRel === 'number') ? T.targetRel : -1,
         turnW: (typeof T.turnWRel === 'number') ? T.turnWRel : -1,
         picks: T.picks || [],
@@ -5786,8 +5865,14 @@ define("js/app.js", function (require, module, exports) {
     T.drawnFrom = T.drawnFrom || {};   // 演示入口/旧状态可能缺该字段
     if (T.plan && T.plan.losers && T.plan.losers.indexOf(p) < 0) { toast('只能从败方手里抽'); return; }
     if (S.mode === 'online') {
+      if (!T.myTurn) { toast('还没轮到你抽牌'); return; }
       if ((T.canDraw || []).indexOf(p) < 0) { toast('这个人已经抽过了'); return; }
-      NET.send({ t: 'drawPick', seatRel: p });
+      // 独食抽牌方向每败方有配额：UI 先行拦截，免得发过去被服务端回「这家已抽满」
+      var loneDraw = !!(T.pairQuota && T.plan && T.plan.winners && T.plan.winners.length === 1);
+      if (loneDraw && (T.drawnFrom[p] || 0) >= T.pairQuota) { toast('这家已抽满，换一家'); return; }
+      // 服务端协议是 draw（按座位随机抽一张）；此前这里发 drawPick，服务端没有该类型，
+      // 真人抽牌请求被静默丢弃，只能等超时由 AI 代抽
+      NET.send({ t: 'draw', seatRel: p });
       return;
     }
     if (!T.humanIsWinner) return;
@@ -5813,7 +5898,7 @@ define("js/app.js", function (require, module, exports) {
     var T = S.tribute;
     if (!T || T.stage !== 'pull' || !T.pull) return;
     T.drawnFrom = T.drawnFrom || {};
-    if (S.mode === 'online') { NET.send({ t: 'pullPick', seatRel: rel, idx: idx }); return; }
+    if (S.mode === 'online') { NET.send({ t: 'draw', seatRel: rel }); return; }
     var p = rel;
     // 每败方上限仅适用独食抽牌方向（winners.length===1）；被抽方向（losers.length===1）
     // 配额按每位胜方计，drawnFrom[lone] 是跨胜方合计，此处若误拦真人会与 aiJobPending 死锁
@@ -5824,10 +5909,17 @@ define("js/app.js", function (require, module, exports) {
     var k = Math.max(0, Math.min(idx, hand.length - 1));
     var c = hand[k];
     if (GX.Tribute.isIdentity(c)) {
-      T.reveals.push({ owner: p, card: c });
-      T.log.push({ text: SEAT_NAMES[p] + ' 的 ' + suitRank(c) + ' 是身份牌，亮出归还后重抽', kind: 'warn' });
+      // 同一张身份牌重复点到：只亮一次，避免徽标/日志重复
+      var already = (T.reveals || []).some(function (r) {
+        return r.owner === p && r.card && r.card.r === c.r && r.card.s === c.s;
+      });
+      if (!already) {
+        T.reveals.push({ owner: p, card: c });
+        T.log.push({ text: SEAT_NAMES[p] + ' 的 ' + suitRank(c) + ' 是身份牌，亮出归还后重抽', kind: 'warn' });
+      }
       S.game.players[p].revealed = true;
-      S.game.players[p].revealedCards = (S.game.players[p].revealedCards || []).concat([c.r]);
+      var rc0 = S.game.players[p].revealedCards = S.game.players[p].revealedCards || [];
+      if (rc0.indexOf(c.r) < 0) rc0.push(c.r);
       S.game.players[p].revealedCard = c.r;
       P.markDirty();
       return;
@@ -5872,6 +5964,7 @@ define("js/app.js", function (require, module, exports) {
   function toggleReturnSelect(c) {
     var T = S.tribute;
     if (!T || T.stage !== 'return' || !c) return;
+    if (GX.Tribute.isIdentity(c)) { toast('身份牌不能还贡'); return; }
     var at = -1;
     S.selected.forEach(function (x, i) { if (x.r === c.r && x.s === c.s) at = i; });
     if (at >= 0) {
@@ -5915,12 +6008,17 @@ define("js/app.js", function (require, module, exports) {
     if (S.selected.length > left) { toast('最多还能还 ' + left + ' 张'); return; }
 
     var cards = S.selected.slice();
-    S.selected = [];
     if (S.mode === 'online') {
-      NET.send({ t: 'retOne', cards: cards });
+      // 服务端 return 是批次接口：必须一次把 T.need 张全还上，少还/多还都会被拒
+      var need = T.need || 0;
+      if (!cards.length || cards.length !== need) { toast('要一次还 ' + need + ' 张'); return; }
+      S.selected = [];
+      // 此前发的是 retOne，服务端只认 return → 真人还贡永远不生效，20 秒后 AI 代还
+      NET.send({ t: 'return', cards: cards });
       P.markDirty();
       return;
     }
+    S.selected = [];
     cards.forEach(function (c) { returnOneLocal(c); });
     SFX.play('ret');
     S.fx.retT0 = Date.now();
@@ -6067,8 +6165,17 @@ define("js/app.js", function (require, module, exports) {
       });
       lead = best.from;
     }
+    var pending = false;
+    if (lead < 0) {
+      // 抽牌记录为空（不该发生）：退回 ♦4 先出，不能把 turn 设成 -1 让整桌卡死
+      lead = 0;
+      for (var q = 0; q < 4; q++) {
+        if (S.game.players[q].hand.some(function (c) { return c.r === 4 && c.s === 0; })) { lead = q; break; }
+      }
+      pending = true;
+    }
     S.game.turn = lead;
-    S.game.firstPlayPending = false;
+    S.game.firstPlayPending = pending;
     S.phase = 'play';
     S.tribute = null;
     S.selected = [];
@@ -6409,6 +6516,9 @@ define("js/app.js", function (require, module, exports) {
     }
     if (h.act === 'confirmReturn') { confirmReturn(); return; }
     if (h.act === 'toMenu') {
+      // 联机总结页点「回到开始界面」必须真正退房：只改本地 phase 会留下幽灵座位，
+      // 房主还占着房，其他人既开不了新局也等不到房主
+      if (S.mode === 'online') { backToSolo(); return; }
       clearTurnTimer();
       clearTributeTimer();
       S.phase = 'menu';
@@ -6447,7 +6557,12 @@ define("js/app.js", function (require, module, exports) {
       return;
     }
     if (h.act === 'newMatch') {
-      if (S.mode === 'online') { toast('联机中不能重开，点标题可离开房间'); return; }
+      if (S.mode === 'online') {
+        // 打满局数的总结页：房主点「再来一场」重开同房新一场，其他人等房主
+        if (!S.isHost) { toast('等房主再来一场'); return; }
+        NET.send({ t: 'next' });
+        return;
+      }
       if ((S.phase === 'play' || S.phase === 'tribute') && Date.now() > S.resetPending) {
         S.resetPending = Date.now() + 3000;
         toast('再点一次确认重开');

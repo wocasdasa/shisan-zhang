@@ -35,6 +35,8 @@ class Conn extends EventEmitter {
     this.socket = socket;
     this.alive = true;
     this.buf = Buffer.alloc(0);
+    this.frag = null;          // 分片文本帧累积（{ parts, bytes }）
+    this.closeEmitted = false;
     this.id = crypto.randomBytes(4).toString('hex');
     this.maxPayload = (opts && opts.maxPayload) || DEFAULT_MAX_PAYLOAD;
     this.lastSeen = Date.now(); // 任意入站数据都会刷新，用于清理死连接
@@ -45,8 +47,30 @@ class Conn extends EventEmitter {
       this.buf = Buffer.concat([this.buf, chunk]);
       this.drain();
     });
-    socket.on('close', () => { this.alive = false; this.emit('close'); });
-    socket.on('error', () => { this.alive = false; this.emit('close'); });
+    socket.on('close', () => this.finish());
+    // 对端只发 FIN（半关闭）不发 WebSocket close 帧：不少网络设备/崩溃进程就是这样断的，
+    // 只监听 'close' 会把这个连接和它的座位永远留在内存里
+    socket.on('end', () => { try { socket.end(); } catch (e) {} this.finish(); });
+    socket.on('error', () => { try { socket.destroy(); } catch (e) {} this.finish(); });
+  }
+
+  finish() {
+    if (this.closeEmitted) return;
+    this.closeEmitted = true;
+    this.alive = false;
+    this.emit('close');
+  }
+
+  // 分片上限也按 maxPayload 算，避免用「很多小分片」绕过 64KB 限制
+  appendFragment(opcode, payload, fin) {
+    if (!this.frag) this.frag = { opcode, parts: [], bytes: 0 };
+    this.frag.bytes += payload.length;
+    if (this.frag.bytes > this.maxPayload) { this.close(); return null; }
+    this.frag.parts.push(payload);
+    if (!fin) return null;
+    const text = Buffer.concat(this.frag.parts).toString('utf8');
+    this.frag = null;
+    return text;
   }
 
   drain() {
@@ -79,18 +103,35 @@ class Conn extends EventEmitter {
       const payloadRaw = this.buf.slice(offset, offset + len);
       this.buf = this.buf.slice(offset + len);
 
+      // RFC6455：客户端帧必须掩码（浏览器 / 微信都会带），不带就是畸形客户端
+      if (!masked && opcode !== 0xA) { this.close(); return; }
+
       let payload = payloadRaw;
       if (maskKey) {
         payload = Buffer.alloc(len);
         for (let i = 0; i < len; i++) payload[i] = payloadRaw[i] ^ maskKey[i % 4];
       }
 
-      if (opcode === 0x1) {
-        if (!fin) continue; // 本项目不用分片
-        let text = payload.toString('utf8');
+      if (opcode === 0x1 || opcode === 0x0) {
+        let text = null;
+        if (opcode === 0x1 && !fin) {
+          text = this.appendFragment(0x1, payload, false);
+          continue;
+        }
+        if (opcode === 0x0) {
+          if (!this.frag) { this.close(); return; }
+          text = this.appendFragment(0x0, payload, fin);
+          if (text === null) continue;
+        } else {
+          text = fin ? payload.toString('utf8') : null;
+        }
+        if (text === null) continue;
         let msg;
         try { msg = JSON.parse(text); } catch (e) { continue; }
-        this.emit('message', msg);
+        // 单个消息处理抛错不能带走整个进程（一条畸形消息就能打崩服务端）
+        try { this.emit('message', msg); } catch (e) {
+          console.error('[ws] 消息处理异常：' + (e && e.stack ? e.stack : e));
+        }
       } else if (opcode === 0x8) {
         this.close();
       } else if (opcode === 0x9) {
@@ -110,9 +151,10 @@ class Conn extends EventEmitter {
     if (!this.alive) return;
     this.alive = false;
     this.buf = Buffer.alloc(0);
+    this.frag = null;
     try { this.socket.write(encodeFrame(0x8, Buffer.alloc(0))); } catch (e) {}
     try { this.socket.end(); } catch (e) {}
-    this.emit('close');
+    this.finish();
   }
 }
 

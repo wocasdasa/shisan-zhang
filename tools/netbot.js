@@ -4,6 +4,7 @@ const GX = require('../engine/index.js');
 
 const URL = process.env.URL || 'ws://127.0.0.1:8787';
 const ROUNDS = Number(process.env.ROUNDS || 8);
+const REMATCH = process.env.REMATCH === '1';
 const cfg = GX.Rules.resolve();
 
 const bots = [];
@@ -11,6 +12,8 @@ let started = false;
 let finished = false;
 let lastRound = 0;
 let actions = 0;
+let rematchAsked = false;
+let rematchDone = false;
 
 function decide(view) {
   const hand = view.hand;
@@ -68,12 +71,27 @@ function makeBot(i) {
     c.pending = false;
 
     if (m.phase === 'summary') {
+      if (REMATCH) {
+        if (!rematchAsked) {
+          rematchAsked = true;
+          console.log('全场结束（' + m.round + '/' + m.rounds + ' 局），请求再来一场；分数=' + JSON.stringify(m.summary && m.summary.scores));
+          if (m.host) setTimeout(() => c.send({ t: 'next' }), 300);
+        }
+        return;
+      }
       if (!finished) {
         finished = true;
         console.log('全场结束，累计分（bot1视角，你/左/上/右）：' + JSON.stringify(m.summary.scores));
         console.log('总步数：' + actions);
         setTimeout(() => { bots.forEach((b) => b.close()); process.exit(0); }, 300);
       }
+      return;
+    }
+
+    if (rematchAsked && !rematchDone && m.round === 1 && (m.phase === 'deal' || m.phase === 'play')) {
+      rematchDone = true;
+      console.log('REMATCH-PASS：已重开第 1 局，phase=' + m.phase + '，分数=' + JSON.stringify((m.seats || []).map((s) => s.score)));
+      setTimeout(() => { bots.forEach((b) => b.close()); process.exit(0); }, 500);
       return;
     }
 
@@ -88,7 +106,14 @@ function makeBot(i) {
     if (m.tribute) {
       const T = m.tribute;
       if (T.myTurnToDraw) {
-        const rel = T.canDraw[Math.floor(Math.random() * T.canDraw.length)];
+        if (Date.now() - (c.lastDrawAt || 0) < 600) return;   // 防同一状态连点：测试端也要去重
+        const pool = (T.canDraw || []).filter((r) => {
+          const loneDraw = !!(T.pairQuota != null && (T.winnersRel || []).length === 1);
+          return !loneDraw || ((T.pulledFrom || {})[r] || 0) < T.pairQuota;
+        });
+        if (!pool.length) return;
+        const rel = pool[Math.floor(Math.random() * pool.length)];
+        c.lastDrawAt = Date.now();
         setTimeout(() => c.send({ t: 'draw', seatRel: rel }), 260);
         return;
       }

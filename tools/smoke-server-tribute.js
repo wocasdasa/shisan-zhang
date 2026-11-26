@@ -106,7 +106,7 @@ console.log('场景1: 独食被抽方向 interleave（lone=seat3 第4名, winner
   // seat0(AI) 应已同步完成 抽4+还4 → 轮到 seat1(真人) 抽牌时独食牌池已回填 13
   ok(conn.lastView && conn.lastView.tribute && conn.lastView.tribute.myTurnToDraw === true, '轮到真人 seat1 抽牌');
   ok(conn.lastView.tribute.pairQuota === 4, 'view.tribute.pairQuota=4 已广播');
-  ok((conn.lastView.tribute.pulledFrom || {})[3] === 4, 'pulledFrom[seat3]=4（AI 已抽 4 张）');
+  ok((conn.lastView.tribute.pulledFrom || {})[2] === 4, 'pulledFrom[rel 2]=4（AI 已从独食 seat3 抽 4 张）');
   ok(conn.lastView.seats[2].count === 13, '交错回填：真人开抽前独食牌池=13（AI 抽还已完成）');
   ok(handSizes(room).join() === '13,13,13,13', '此时四家仍各 13 张');
 
@@ -159,6 +159,24 @@ console.log('场景2: 独食抽牌方向 per-loser cap（lone=seat0 第1名=真�
   ok(conn.lastView.tribute.need === 12, 'view 还贡 need=12');
 
   const give = lowestNonIdentity(room, 0, 12, cfg);
+  // 非法批次：少还 / 身份牌 / 不在手里的牌 —— 都必须拒绝且不动手牌
+  conn.errs.length = 0;
+  SRV.handle(conn, { t: 'return', cards: give.slice(0, 11) });
+  ok(conn.errs.indexOf('要还 12 张') >= 0 && handSizes(room).join() === '25,9,9,9',
+    '少还 1 张被拒且手牌不变，实际 ' + JSON.stringify(conn.errs));
+  conn.errs.length = 0;
+  SRV.handle(conn, { t: 'return', cards: give.slice(0, 11).concat([{ r: 3, s: 3 }]) });
+  ok(conn.errs.indexOf('身份牌不能还贡') >= 0 && handSizes(room).join() === '25,9,9,9',
+    '还 ♠3 被拒且手牌不变，实际 ' + JSON.stringify(conn.errs));
+  conn.errs.length = 0;
+  let absent = null;
+  for (let r = 2; r <= 14 && !absent; r++) for (let s = 0; s < 4 && !absent; s++) {
+    if (!hasCard(room, 0, s, r)) absent = { r: r, s: s };
+  }
+  SRV.handle(conn, { t: 'return', cards: give.slice(0, 11).concat([absent]) });
+  const stillErr = conn.errs.indexOf('还贡的牌不在手里') >= 0;
+  ok(stillErr && handSizes(room).join() === '25,9,9,9',
+    '还不在手里的牌被拒且手牌不变，实际 ' + JSON.stringify(conn.errs));
   SRV.handle(conn, { t: 'return', cards: give });
   ok(room.phase === 'play', '还贡完成进入出牌');
   ok(handSizes(room).join() === '13,13,13,13', '终局四家各 13 张（每家等量还对应被抽者）');
@@ -178,6 +196,35 @@ console.log('场景3: 2v2 双下回归（全 AI, winners=[0,2], 各抽 2 还 2�
   ok(handSizes(room).join() === '13,13,13,13', '2v2 还贡真实生效：四家各 13 张');
   const total = handSizes(room).reduce((a, b) => a + b, 0);
   ok(total === 52, '总牌数 52');
+  cleanup(room);
+})();
+
+// ---------- 场景 4：view 的队友提示 / 房规下发 ----------
+console.log('场景4: view.seats[].team 按房规 none/reveal/always，独食局不泄露；view.cfg 下发 15 秒');
+(function () {
+  const room = makeRoom(Object.assign({}, cfg, { teamHint: 'always' }), null, 0, 20261124);
+  room.phase = 'play';
+  room.turnMs = 15000;
+  room.game.camp = { mode: 'team', teamA: [0, 2], teamB: [1, 3], s3: 0, sA: 2, teams: { a: [0, 2], b: [1, 3] } };
+  let v = SRV.viewFor(room, 0);
+  ok(v.seats[0].team === 0 && v.seats[2].team === 0,
+    'always：我和队友(座2)都标 team=0，实际 ' + JSON.stringify([v.seats[0].team, v.seats[2].team]));
+  ok(v.seats[1].team === 1 && v.seats[3].team === 1, 'always：两名对手标 team=1');
+  ok(v.cfg && v.cfg.turnSeconds === 15 && v.cfg.teamHint === 'always',
+    'view.cfg 下发房规：' + JSON.stringify(v.cfg));
+
+  room.cfg.teamHint = 'reveal';
+  v = SRV.viewFor(room, 0);
+  ok(v.seats[2].team === undefined, 'reveal：没人亮身份牌时不下发队友（实际 ' + v.seats[2].team + '）');
+  room.game.players[1].revealedCards = [3];   // 对手打出/亮出 ♠3
+  v = SRV.viewFor(room, 0);
+  ok(v.seats[2].team === 0, 'reveal：亮牌后下发队友');
+
+  room.cfg.teamHint = 'always';
+  room.game.camp = { mode: 'lone', lone: 1, teamA: [1], teamB: [0, 2, 3], teams: { lone: [1], rest: [0, 2, 3] } };
+  v = SRV.viewFor(room, 0);
+  ok([0, 1, 2, 3].every((p) => v.seats[p].team === undefined), '独食局即使 always 也不下发 team（不提前泄露独食）');
+
   cleanup(room);
 })();
 

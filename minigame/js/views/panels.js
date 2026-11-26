@@ -40,18 +40,26 @@ module.exports = function (B) {
     var retFrom = (T.ret && typeof T.ret.curFrom === 'number') ? T.ret.curFrom
       : ((T.retQueue && T.retQueue[T.retIdx]) ? T.retQueue[T.retIdx].from : -1);
     var prog = '进贡完成';
-    if (T.stage === 'draw') prog = T.humanIsWinner ? '点金框的对手抽牌' : '等待对手抽牌';
+    if (T.stage === 'draw') prog = T.humanIsWinner
+      ? ('点金框的对手抽牌' + (T.drawNeed ? '（还差 ' + T.drawNeed + ' 张）' : ''))
+      : '等待对手抽牌';
     else if (T.stage === 'pull') prog = '点牌背抽牌（' + ((T.pull && T.pull.done) || 0) + '/' + cnt + '）';
     else if (T.stage === 'return') {
-      prog = '还贡 ' + Math.min(retIdx + 1, retTotal) + '/' + retTotal + ' → 还给 ' + (retFrom >= 0 ? SEAT_NAMES[retFrom] : '')
-        + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : '');
+      if (state.mode === 'online') {
+        prog = (T.need || 0) > 0
+          ? ('选 ' + T.need + ' 张还贡' + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : ''))
+          : '等待对方还贡';
+      } else {
+        prog = '还贡 ' + Math.min(retIdx + 1, retTotal) + '/' + retTotal + ' → 还给 ' + (retFrom >= 0 ? SEAT_NAMES[retFrom] : '')
+          + ((S.selected || []).length ? ' · 已选 ' + S.selected.length + ' 张' : '');
+      }
     }
 
     txt(ctx, '第 ' + S.round + ' 局 · 进贡', barX + 16, barY + barH / 2, 15, C.gold, 'left', 600);
     txt(ctx, prog, barX + barW / 2 - 40, barY + barH / 2, 15, C.text, 'center', 600);
 
     // 还贡按钮（做出牌那种胶囊）：勾选完点这里才提交
-    if (T.stage === 'return') {
+    if (T.stage === 'return' && !(state.mode === 'online' && (T.need || 0) === 0)) {
       var selN = (S.selected || []).length;
       var bww = 148, bhh = 32;
       var bxx = barX + barW - bww - 8, byy = barY + (barH - bhh) / 2;

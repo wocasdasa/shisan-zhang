@@ -11,7 +11,7 @@ const FILES = [
   'js/engine/cards.js', 'js/engine/rules.js', 'js/engine/camp.js', 'js/engine/info.js',
   'js/engine/hand.js', 'js/engine/moves.js', 'js/engine/table.js',
   'js/engine/ai.js', 'js/engine/ai2.js', 'js/engine/settle.js', 'js/engine/tribute.js',
-  'js/engine/index.js', 'js/audio.js', 'js/net.js', 'js/platform.js', 'js/views.js', 'js/app.js'
+  'js/engine/index.js', 'js/audio.js', 'js/net.js', 'js/platform.js', 'js/views/base.js', 'js/views/table.js', 'js/views/panels.js', 'js/views.js', 'js/app.js'
 ];
 
 // ---- 浏览器环境打平 ----
@@ -241,11 +241,125 @@ function run() {
   ok(tx4.indexOf('13 张') >= 0, 'D: 旧后端应保持"13 张"，实际 ' + tx4.join('|'));
   ok(pullHits(r4.hits, 1).length === 13, 'D: 旧后端热区不应变化');
 
+  // ---- 场景 E：新后端显式 pulledFromRel（含身份牌重抽，draws 少于实际被抽数）----
+  handlers.message(baseView({
+    pairQuota: 4, pulledFromRel: true, pulledFrom: { 1: 4, 2: 4 },
+    winnersRel: [0], canDraw: [1, 2, 3],
+    draws: mkDraws(1, 4).concat(mkDraws(2, 3)),
+    pull: { rows: [{ rel: 1, n: 9 }, { rel: 2, n: 10 }, { rel: 3, n: 13 }], done: 8, total: 12, count: 12 }
+  }));
+  T = S.tribute;
+  rows = T.pull.rows;
+  ok(T.drawnFrom && T.drawnFrom[1] === 4 && T.drawnFrom[2] === 4,
+    'E: 带 pulledFromRel 时应采用服务端 rel 配额（含重抽），实际 ' + JSON.stringify(T && T.drawnFrom));
+
+  // ---- 场景 F：联机抽牌必须发 draw（不是 drawPick），抽满的座位本地拦截 ----
+  sent.length = 0;
+  handlers.message(baseView({
+    stage: 'draw', winnerRanks: [1], winnersRel: [0], canDraw: [1, 2, 3],
+    pairQuota: 4, pulledFromRel: true, pulledFrom: { 1: 4, 2: 3 }, drawNeed: 5,
+    myTurnToDraw: true, draws: mkDraws(1, 4).concat(mkDraws(2, 3))
+  }));
+  let rF = render(S);
+  S.hits = rF.hits;
+  const seat2 = rF.hits.filter(h => h.act === 'drawSeat' && h.p === 2)[0];
+  ok(seat2, 'F: 座位 2 应有 drawSeat 热区');
+  if (seat2) window.__gx.onTap(seat2.x + seat2.w / 2, seat2.y + seat2.h / 2);
+  ok(sent.length && sent[0].t === 'draw' && sent[0].seatRel === 2,
+    'F: 点座位抽牌应发 {t:"draw",seatRel:2}，实际 ' + JSON.stringify(sent[0]));
+
+  sent.length = 0;
+  // 把座位 2 标成已抽满（drawnFrom=4），再点应被本地拦住、不发消息
+  handlers.message(baseView({
+    stage: 'draw', winnerRanks: [1], winnersRel: [0], canDraw: [1, 2, 3],
+    pairQuota: 4, pulledFromRel: true, pulledFrom: { 1: 4, 2: 4 }, drawNeed: 4,
+    myTurnToDraw: true, draws: mkDraws(1, 4).concat(mkDraws(2, 4))
+  }));
+  rF = render(S);
+  S.hits = rF.hits;
+  const full2 = rF.hits.filter(h => h.act === 'drawSeat' && h.p === 2)[0];
+  ok(!full2, 'F: 已抽满的座位不应再有 drawSeat 热区');
+  if (full2) window.__gx.onTap(full2.x + full2.w / 2, full2.y + full2.h / 2);
+  ok(sent.length === 0, 'F: 已抽满的座位再点不应发 draw，实际 ' + JSON.stringify(sent[0]));
+
+  // ---- 场景 G：联机还贡发 return 批次，且能勾选到牌（retRemaining 不能再恒 0）----
+  sent.length = 0;
+  handlers.message(baseView({
+    stage: 'return', winnerRanks: [1], winnersRel: [0], canDraw: [],
+    need: 2, draws: mkDraws(1, 1).concat(mkDraws(2, 1))
+  }));
+  S.lobby = null; S.waitRoom = false; S.selected = [];   // 已进房，不是大厅弹层（否则手牌/热区被跳过）
+  let rG = render(S);
+  S.hits = rG.hits;
+  const cardHits = rG.hits.filter(h => h.act === 'card');
+  ok(cardHits.length >= 2, 'G: 还贡阶段手牌应有 card 热区，实际 ' + cardHits.length);
+  [0, 1].forEach(function (k) {
+    const h = cardHits[k];
+    if (h) window.__gx.onTap(h.x + h.w / 2, h.y + h.h / 2);
+  });
+  ok(S.selected.length === 2, 'G: 应能勾选 2 张（旧逻辑 retRemaining 恒 0 会一张都选不上），实际 ' + S.selected);
+  const confirm = rG.hits.filter(h => h.act === 'confirmReturn')[0];
+  ok(confirm, 'G: 还贡阶段应有 confirmReturn 热区');
+  if (confirm) window.__gx.onTap(confirm.x + confirm.w / 2, confirm.y + confirm.h / 2);
+  ok(sent.length && sent[0].t === 'return' && Array.isArray(sent[0].cards) && sent[0].cards.length === 2,
+    'G: 点还贡应发 {t:"return",cards:[2张]}，实际 ' + JSON.stringify(sent[0]));
+
+  // ---- 场景 H：全场总结页房主「再来一场」应发 next 重开，非房主点击不发 ----
+  function summaryView(isHost) {
+    return {
+      t: 'state', room: 'AB12', phase: 'summary', round: 8, rounds: 8,
+      seats: [0, 1, 2, 3].map(i => ({ name: 'P' + i, ready: true, score: i === 0 ? 6 : -2, count: 0 })),
+      youSeatRel: 0, hand: [], trickPlays: [], turn: -1, combo: null,
+      firstPlayPending: false, over: false, deadline: 0, host: isHost,
+      tribute: null
+    };
+  }
+  sent.length = 0;
+  handlers.message(summaryView(true));
+  let rH = render(S);
+  S.hits = rH.hits;
+  const nmHost = rH.hits.filter(h => h.act === 'newMatch')[0];
+  ok(nmHost, 'H: 总结页应有「再来一场」热区');
+  if (nmHost) window.__gx.onTap(nmHost.x + nmHost.w / 2, nmHost.y + nmHost.h / 2);
+  ok(sent.length && sent[0].t === 'next',
+    'H: 房主点再来一场应发 {t:"next"}，实际 ' + JSON.stringify(sent[0]));
+
+  sent.length = 0;
+  handlers.message(summaryView(false));
+  rH = render(S);
+  S.hits = rH.hits;
+  const nmGuest = rH.hits.filter(h => h.act === 'newMatch')[0];
+  if (nmGuest) window.__gx.onTap(nmGuest.x + nmGuest.w / 2, nmGuest.y + nmGuest.h / 2);
+  ok(sent.length === 0, 'H: 非房主点再来一场不应发消息，实际 ' + JSON.stringify(sent[0]));
+
+  // ---- 场景 I：同一 key 在别处登录，收到 superseded 必须清掉重连凭据并回大厅 ----
+  handlers.message({ t: 'superseded', msg: '座位已在另一处登录' });
+  ok(!S.rejoin, 'I: superseded 后应清掉 rejoin，实际 ' + JSON.stringify(S.rejoin));
+  ok(S.lobby && S.lobby.err === '座位已在另一处登录', 'I: 应回联机大厅并展示接管提示，实际 lobby=' + JSON.stringify(S.lobby));
+
+  // ---- 场景 J：联机总结页「回到开始界面」必须真正退房，不能只改本地 phase ----
+  handlers.message(summaryView(true));
+  S.lobby = null; S.waitRoom = false; S.leaving = false;
+  rH = render(S);
+  S.hits = rH.hits;
+  const tm = rH.hits.filter(h => h.act === 'toMenu')[0];
+  ok(tm, 'J: 总结页应有「回到开始界面」热区');
+  sent.length = 0;
+  if (tm) window.__gx.onTap(tm.x + tm.w / 2, tm.y + tm.h / 2);
+  ok(sent.some(x => x.t === 'leave') && S.mode === 'solo' && !S.room && !S.summary,
+    'J: 应发送 leave 并回到单机开始界面，实际 sent=' + JSON.stringify(sent) + ' mode=' + S.mode + ' room=' + S.room + ' summary=' + S.summary);
+
   const lines = [];
   lines.push('场景A（独食抽牌方向 cap/got/置灰/热区抑制）: ' + (fails.filter(f => f[0] === 'A').length ? 'FAIL' : 'PASS'));
   lines.push('场景B（被抽方向单排不误判置灰）: ' + (fails.filter(f => f[0] === 'B').length ? 'FAIL' : 'PASS'));
   lines.push('场景C（2v2 零变化）: ' + (fails.filter(f => f[0] === 'C').length ? 'FAIL' : 'PASS'));
   lines.push('场景D（旧后端零变化）: ' + (fails.filter(f => f[0] === 'D').length ? 'FAIL' : 'PASS'));
+  lines.push('场景E（新后端 rel 配额含重抽）: ' + (fails.filter(f => f[0] === 'E').length ? 'FAIL' : 'PASS'));
+  lines.push('场景F（联机抽牌发 draw）: ' + (fails.filter(f => f[0] === 'F').length ? 'FAIL' : 'PASS'));
+  lines.push('场景G（联机还贡发 return 批次）: ' + (fails.filter(f => f[0] === 'G').length ? 'FAIL' : 'PASS'));
+  lines.push('场景H（总结页再来一场 next 协议）: ' + (fails.filter(f => f[0] === 'H').length ? 'FAIL' : 'PASS'));
+  lines.push('场景I（superseded 清凭据回大厅）: ' + (fails.filter(f => f[0] === 'I').length ? 'FAIL' : 'PASS'));
+  lines.push('场景J（总结页回开始界面退房）: ' + (fails.filter(f => f[0] === 'J').length ? 'FAIL' : 'PASS'));
   if (fails.length) { lines.push('FAILURES:'); fails.forEach(f => lines.push(' - ' + f)); }
   else lines.push('CHECK-PASS');
   console.log(lines.join('\n'));
