@@ -24,35 +24,34 @@ module.exports = function (B) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
     var online = S.mode === 'online';
     // 副标题收在标题正下方，左侧整块留给标题，右上角留给功能 chip
-    txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '单机 · 三家 AI',
+    txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '试玩 · 三家 AI',
       26, 66, 14, online ? C.gold : C.dim, 'left', 400);
-    hits.push({ x: 16, y: 52, w: 180, h: 26, act: 'mode' });
+    // 房间状态只做展示；离开牌桌统一走「主界面」二次确认，避免误触掉线
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = state.W - 24;
-    // 重开
-    x -= 78;
-    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
-    txt(ctx, '重开', x + 39, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'newMatch' });
+    // 场次/对手/进贡/重开都是本地单机遗留；联机房间里的规则由房主在创建时设定，牌桌上不再出现
+    if (!online) {
+      x -= 78;
+      box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+      txt(ctx, '重开', x + 39, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'newMatch' });
 
-    // 对手强度
-    x -= gap + 86;
-    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
-    txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 86, h: h, act: 'level' });
+      x -= gap + 86;
+      box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+      txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 86, h: h, act: 'level' });
 
-    // 进贡档位
-    x -= gap + 86;
-    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
-    txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 86, h: h, act: 'tier' });
+      x -= gap + 86;
+      box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+      txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 86, h: h, act: 'tier' });
 
-    // 场次
-    x -= gap + 78;
-    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
-    txt(ctx, S.rounds + '局', x + 39, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'round' });
+      x -= gap + 78;
+      box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+      txt(ctx, S.rounds + '局', x + 39, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'round' });
+    }
 
     // 音效开关
     x -= gap + 78;
@@ -62,11 +61,13 @@ module.exports = function (B) {
     txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, fs, on ? C.text : C.dim);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'audio' });
 
-    // 测试入口（点开小面板：特殊牌 / 进贡流程）
-    x -= gap + 78;
-    box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
-    txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
+    // 测试入口只在试玩/预览里出现；正式联机牌桌不暴露调试面板
+    if (!online) {
+      x -= gap + 78;
+      box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
+      txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
+    }
 
     // 第二排：辅助工具（托管 / 记牌 / 更多），右对齐，避开左侧标题与副标题
     var y2 = 72, h2 = 36, fs2 = 14, rad2 = 18, gap2 = 8;

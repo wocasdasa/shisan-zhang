@@ -234,10 +234,7 @@ module.exports = function (B) {
     var cw = land ? Math.max(700, Math.min(1040, state.W * 0.6)) : Math.min(640, state.W - 56);
     var cx = (state.W - cw) / 2;
 
-    var ty = land ? 72 : 150;
-    txt(ctx, '十三张 · 独食', state.W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
-    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', state.W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
-
+    // 主菜单内容整体居中：竖屏高屏不再把按钮顶在上半屏、下面留一大片空
     var lines = [
       '♦4 起手，第一手必须带 ♦4',
       '点数 3 最大、4 最小；花色 ♠ > ♥ > ♣ > ♦',
@@ -246,8 +243,17 @@ module.exports = function (B) {
       '第 2 局起进贡：胜方从败方抽牌，抽到身份牌亮出归还重抽'
     ];
     var lh = land ? 36 : 28;
-    var ry = ty + (land ? 86 : 84);
     var rh = lh * lines.length + (land ? 52 : 54);
+    var gapBefore = land ? 30 : 34;
+    var bh = land ? 96 : 88;
+    var contentH = 46 + 84 + rh + gapBefore + bh;
+    // 横屏牌桌内框顶边约 198：标题落在边框上方，玩法卡与按钮落进桌内
+    var ty = land ? 124 : Math.max(100, Math.round((H - contentH) / 2 + 46));
+
+    txt(ctx, '十三张 · 独食', state.W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
+    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', state.W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
+
+    var ry = ty + (land ? 86 : 84);
     box(ctx, cx, ry, cw, rh, 14, 'rgba(10,20,34,0.74)', C.panelLine);
     txt(ctx, '玩法', cx + (land ? 32 : 24), ry + (land ? 26 : 26), land ? 19 : 15, C.gold, 'left', 600);
     lines.forEach(function (l, i) {
@@ -255,37 +261,17 @@ module.exports = function (B) {
         ry + (land ? 58 : 56) + i * lh, land ? 23 : 14, C.text, 'left');
     });
 
-    var sy = ry + rh + (land ? 20 : 22);
-    var chips = [
-      { act: 'cfgRounds', label: '场次', value: S.rounds + ' 局' },
-      { act: 'cfgLevel', label: '对手', value: ['新手', '普通', '高手'][S.level] || '普通' },
-      { act: 'cfgTribute', label: '进贡', value: !S.cfg.tributeEnabled ? '关闭' : (S.cfg.tributeTier === 'heavy' ? '重贡 4/2' : '轻贡 2/1') }
-    ];
-    var gapC = 12;
-    var chipW = (cw - gapC * 2) / 3;
-    var chipH = land ? 80 : 66;
-    chips.forEach(function (c, i) {
-      var x = cx + i * (chipW + gapC);
-      box(ctx, x, sy, chipW, chipH, 12, 'rgba(10,20,34,0.82)', C.panelLine);
-      txt(ctx, c.label, x + chipW / 2, sy + chipH * 0.32, land ? 17 : 13, C.dim);
-      txt(ctx, c.value, x + chipW / 2, sy + chipH * 0.68, land ? 26 : 17, C.text, 'center', 600);
-      hits.push({ x: x, y: sy, w: chipW, h: chipH, act: c.act });
-    });
+    // 单机入口已取消：开始游戏直接进联机大厅，好友房和快速人机都在服务端房间里进行。
+    var by = ry + rh + gapBefore;
+    var bw = land ? Math.min(cw * 0.62, 700) : Math.min(cw, 460);
+    var bx = (state.W - bw) / 2;
+    box(ctx, bx, by, bw, bh, 14, C.gold, null);
+    txt(ctx, '开始游戏', state.W / 2, by + bh * 0.40 + 1, land ? 34 : 28, '#101f33', 'center', 700);
+    txt(ctx, '联机房间 · 好友或机器人', state.W / 2, by + bh * 0.72,
+      land ? 17 : 13.5, 'rgba(16,31,51,0.72)', 'center', 500);
+    hits.push({ x: bx, y: by, w: bw, h: bh, act: 'netOpen' });
 
-    var by = sy + chipH + (land ? 22 : 24);
-    var bw = land ? Math.min(cw * 0.56, 620) : Math.min(cw, 420);
-    var bh = land ? 86 : 74;
-    box(ctx, (state.W - bw) / 2, by, bw, bh, 14, C.gold, null);
-    txt(ctx, '开始游戏', state.W / 2, by + bh / 2 + 1, land ? 34 : 24, '#101f33', 'center', 700);
-    hits.push({ x: (state.W - bw) / 2, y: by, w: bw, h: bh, act: 'startGame' });
-
-    var ny = by + bh + (land ? 16 : 14);
-    var nh = land ? 64 : 58;
-    box(ctx, (state.W - bw) / 2, ny, bw, nh, 12, C.btn, C.panelLine);
-    txt(ctx, '联机对战', state.W / 2, ny + nh / 2 + 1, land ? 24 : 19, C.text, 'center', 600);
-    hits.push({ x: (state.W - bw) / 2, y: ny, w: bw, h: nh, act: 'netOpen' });
-
-    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', state.W / 2, Math.min(ny + nh + (land ? 34 : 36), H - 18), land ? 17 : 13, C.dim);
+    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', state.W / 2, H - 18, land ? 17 : 13, C.dim);
   }
 
   function summary(ctx, S, L, hits) {
@@ -351,38 +337,78 @@ module.exports = function (B) {
   function lobbyPanel(ctx, S, L, hits) {
     var H = L.H;
     overlay(ctx, H, state.W, H);
-    var pw = 660, ph = S.lobby.kind === 'keypad' ? 660 : S.lobby.kind === 'config' ? 340 : 500;
+    var pw = 660;
+    var ph = S.lobby.kind === 'keypad' ? 660 : S.lobby.kind === 'config' ? 340 :
+      S.lobby.kind === 'quick' ? 430 : 560;
     var px = (state.W - pw) / 2, py = (H - ph) / 2 - ((state.W / H) >= 1.2 ? 20 : 0);
     if (py < 8) py = 8;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
     if (S.lobby.kind === 'entry') {
-      txt(ctx, '联机对战', state.W / 2, py + 56, 28, C.gold, 'center', 600);
-      txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', state.W / 2, py + 88, 14, C.dim);
+      txt(ctx, '选择牌桌', state.W / 2, py + 44, 27, C.gold, 'center', 600);
+      txt(ctx, '好友联机 / 快速人机 · 都在联机房间里进行', state.W / 2, py + 75, 14, C.dim);
       var srv = String(S.lobby.url || '');
       var srvW = Math.min(pw - 80, Math.max(240, (srv.length + 3) * 7.4));
       var srvX = (state.W - srvW) / 2;
-      box(ctx, srvX, py + 100, srvW, 32, 16, C.btn, C.panelLine);
-      txt(ctx, '服务器 ' + srv, state.W / 2, py + 121, 12.5, C.gold, 'center');
-      hits.push({ x: srvX, y: py + 100, w: srvW, h: 32, act: 'netServer' });
+      box(ctx, srvX, py + 92, srvW, 32, 16, C.btn, C.panelLine);
+      txt(ctx, '服务器 ' + srv, state.W / 2, py + 113, 12.5, C.gold, 'center');
+      hits.push({ x: srvX, y: py + 92, w: srvW, h: 32, act: 'netServer' });
 
-      var by = py + 168;
-      box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
-      txt(ctx, '创建房间', state.W / 2, by + 41, 24, '#101f33', 'center', 600);
-      hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netConfig' });
+      var by = py + 148;
+      box(ctx, px + 40, by, pw - 80, 86, 12, C.gold, null);
+      txt(ctx, '快速开局', state.W / 2, by + 33, 25, '#101f33', 'center', 600);
+      txt(ctx, '1 真人 + 3 机器人 · 8 局', state.W / 2, by + 64, 14, 'rgba(16,31,51,0.72)', 'center', 500);
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 86, act: 'netQuick' });
 
-      by += 96;
-      box(ctx, px + 40, by, pw - 80, 78, 12, C.btn, C.panelLine);
-      txt(ctx, '加入房间', state.W / 2, by + 41, 22, C.text, 'center', 600);
-      hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netKeypad' });
+      by += 98;
+      box(ctx, px + 40, by, pw - 80, 64, 12, C.btn, C.panelLine);
+      txt(ctx, '创建好友房', state.W / 2, by + 24, 20, C.text, 'center', 600);
+      txt(ctx, '设局数 / 进贡 / 限时，拿 4 位房号', state.W / 2, by + 46, 12.5, C.dim, 'center');
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 64, act: 'netConfig' });
 
-      by += 104;
-      txt(ctx, S.lobby.err || S.netStatus || '', state.W / 2, by, 15,
+      by += 74;
+      box(ctx, px + 40, by, pw - 80, 64, 12, C.btn, C.panelLine);
+      txt(ctx, '加入房间', state.W / 2, by + 24, 20, C.text, 'center', 600);
+      txt(ctx, '输入朋友发来的 4 位房号', state.W / 2, by + 46, 12.5, C.dim, 'center');
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 64, act: 'netKeypad' });
+
+      txt(ctx, S.lobby.err || S.netStatus || '', state.W / 2, by + 92, 14,
         S.lobby.err ? '#e8b0ae' : C.dim);
 
-      box(ctx, px + 150, py + ph - 92, pw - 300, 58, 10, C.btn, C.panelLine);
-      txt(ctx, '返回单机', state.W / 2, py + ph - 63, 18, C.text, 'center');
-      hits.push({ x: px + 150, y: py + ph - 92, w: pw - 300, h: 58, act: 'netBack' });
+      box(ctx, px + 150, py + ph - 80, pw - 300, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '返回主界面', state.W / 2, py + ph - 54, 17, C.text, 'center');
+      hits.push({ x: px + 150, y: py + ph - 80, w: pw - 300, h: 52, act: 'netBack' });
+      return;
+    }
+
+    if (S.lobby.kind === 'quick') {
+      txt(ctx, '快速开局', state.W / 2, py + 46, 27, C.gold, 'center', 600);
+      txt(ctx, '1 真人 + 3 机器人 · 8 局 · 重贡', state.W / 2, py + 81, 14, C.dim);
+
+      var qsrvW = Math.min(pw - 90, Math.max(230, (String(S.lobby.url || '').length + 3) * 7.2));
+      box(ctx, (state.W - qsrvW) / 2, py + 108, qsrvW, 30, 15, C.btn, C.panelLine);
+      txt(ctx, '服务器 ' + String(S.lobby.url || ''), state.W / 2, py + 128, 12.5, C.gold, 'center');
+      hits.push({ x: (state.W - qsrvW) / 2, y: py + 108, w: qsrvW, h: 30, act: 'netServer' });
+
+      var qerr = S.lobby.err || '';
+      txt(ctx, qerr || '正在创建房间并补入机器人…', state.W / 2, py + 188, 15,
+        qerr ? '#e8b0ae' : C.text, 'center', qerr ? 500 : 400);
+      if (!qerr) {
+        txt(ctx, '开局后直接发牌；掉线可重连，座位会被机器人托管', state.W / 2, py + 214, 12.5, C.dim);
+      }
+
+      if (qerr) {
+        box(ctx, px + 40, py + 250, pw - 80, 58, 12, C.gold, null);
+        txt(ctx, '重新准备', state.W / 2, py + 279, 20, '#101f33', 'center', 600);
+        hits.push({ x: px + 40, y: py + 250, w: pw - 80, h: 58, act: 'netQuickRetry' });
+      } else {
+        txt(ctx, '●   ●   ●', state.W / 2, py + 272, 20, C.gold, 'center', 600);
+        txt(ctx, '请稍候', state.W / 2, py + 297, 12.5, C.dim, 'center');
+      }
+
+      box(ctx, px + 150, py + 330, pw - 300, 50, 10, C.btn, C.panelLine);
+      txt(ctx, '取消并返回主界面', state.W / 2, py + 355, 16, C.text, 'center');
+      hits.push({ x: px + 150, y: py + 330, w: pw - 300, h: 50, act: 'netQuickCancel' });
       return;
     }
 
@@ -823,7 +849,7 @@ module.exports = function (B) {
       hits.push({ x: px + 34, y: py + ph - 62, w: bwb, h: bhb, act: 'guidePrev' });
     }
     box(ctx, px + pw - 34 - bwb, py + ph - 62, bwb, bhb, 12, C.gold, null);
-    txt(ctx, page >= 2 ? '开始游戏' : '下一页', px + pw - 34 - bwb / 2, py + ph - 39, 16, '#101f33', 'center', 600);
+    txt(ctx, page >= 2 ? '知道了' : '下一页', px + pw - 34 - bwb / 2, py + ph - 39, 16, '#101f33', 'center', 600);
     hits.push({
       x: px + pw - 34 - bwb, y: py + ph - 62, w: bwb, h: bhb,
       act: page >= 2 ? 'guideDone' : 'guideNext'
@@ -841,7 +867,7 @@ module.exports = function (B) {
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     txt(ctx, '对局菜单', state.W / 2, py + 46, 22, C.gold, 'center', 600);
     var st = S.stats || {};
-    txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '单机 · 三家 AI') +
+    txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '试玩 · 三家 AI') +
       ' · 第 ' + Math.max(1, S.round) + '/' + S.rounds + ' 局 · 战绩 ' + (st.wins || 0) + ' 胜',
       state.W / 2, py + 72, 13, C.dim, 'center');
 
@@ -884,7 +910,7 @@ module.exports = function (B) {
     var ex = S.ask.kind === 'dissolve';
     txt(ctx, ex ? '解散房间？' : '退出本局？', state.W / 2, py + 56, 24, C.gold, 'center', 600);
     var sub = ex
-      ? '房间会关闭，四位玩家都回联机大厅'
+      ? '房间会关闭：你回主界面，其他人回联机大厅'
       : (S.mode === 'online'
         ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
         : '本局进度不保存，回到主界面');

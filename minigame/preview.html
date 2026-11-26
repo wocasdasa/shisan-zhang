@@ -2285,7 +2285,7 @@ module.exports = function () {
     ctx.fillText(s, x, y);
   }
 
-  function bg(ctx, L) {
+  function bg(ctx, L, opt) {
     var H = L.H;
     var g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, C.bg1);
@@ -2296,11 +2296,13 @@ module.exports = function () {
 
     // 牌桌内框：顶边起于顶排座位牌之下（竖横屏同一来源，见 layout 的 tableTop）
     var pad = 48;
+    var bottom = L.table.bottom;
+    if (opt && opt.menu && L.landscape) bottom = H - 84; // 主菜单横屏：内框包住「开始游戏」按钮
     var inner = {
       x: pad,
       y: L.table.top,
       w: state.W - pad * 2,
-      h: L.table.bottom - L.table.top
+      h: bottom - L.table.top
     };
     box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
 
@@ -3057,35 +3059,34 @@ module.exports = function (B) {
     txt(ctx, '十三张·独食', 24, 44, 26, C.gold, 'left', 600);
     var online = S.mode === 'online';
     // 副标题收在标题正下方，左侧整块留给标题，右上角留给功能 chip
-    txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '单机 · 三家 AI',
+    txt(ctx, online ? ('联机' + (S.room ? ' · 房间 ' + S.room : ' · 未连接')) : '试玩 · 三家 AI',
       26, 66, 14, online ? C.gold : C.dim, 'left', 400);
-    hits.push({ x: 16, y: 52, w: 180, h: 26, act: 'mode' });
+    // 房间状态只做展示；离开牌桌统一走「主界面」二次确认，避免误触掉线
 
     var y = 26, h = 44, gap = 8, rad = 22, fs = 15;
     var x = state.W - 24;
-    // 重开
-    x -= 78;
-    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
-    txt(ctx, '重开', x + 39, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'newMatch' });
+    // 场次/对手/进贡/重开都是本地单机遗留；联机房间里的规则由房主在创建时设定，牌桌上不再出现
+    if (!online) {
+      x -= 78;
+      box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+      txt(ctx, '重开', x + 39, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'newMatch' });
 
-    // 对手强度
-    x -= gap + 86;
-    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
-    txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 86, h: h, act: 'level' });
+      x -= gap + 86;
+      box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+      txt(ctx, ['新手', '普通', '高手'][S.level] || '普通', x + 43, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 86, h: h, act: 'level' });
 
-    // 进贡档位
-    x -= gap + 86;
-    box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
-    txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 86, h: h, act: 'tier' });
+      x -= gap + 86;
+      box(ctx, x, y, 86, h, rad, C.btn, C.panelLine);
+      txt(ctx, S.cfg.tributeTier === 'heavy' ? '重贡' : '轻贡', x + 43, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 86, h: h, act: 'tier' });
 
-    // 场次
-    x -= gap + 78;
-    box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
-    txt(ctx, S.rounds + '局', x + 39, y + h / 2, fs, C.text);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'round' });
+      x -= gap + 78;
+      box(ctx, x, y, 78, h, rad, C.btn, C.panelLine);
+      txt(ctx, S.rounds + '局', x + 39, y + h / 2, fs, C.text);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'round' });
+    }
 
     // 音效开关
     x -= gap + 78;
@@ -3095,11 +3096,13 @@ module.exports = function (B) {
     txt(ctx, on ? '音效' : '静音', x + 39, y + h / 2, fs, on ? C.text : C.dim);
     hits.push({ x: x, y: y, w: 78, h: h, act: 'audio' });
 
-    // 测试入口（点开小面板：特殊牌 / 进贡流程）
-    x -= gap + 78;
-    box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
-    txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
-    hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
+    // 测试入口只在试玩/预览里出现；正式联机牌桌不暴露调试面板
+    if (!online) {
+      x -= gap + 78;
+      box(ctx, x, y, 78, h, rad, 'rgba(216,179,106,0.16)', C.goldDim);
+      txt(ctx, '测试', x + 39, y + h / 2, fs, C.gold);
+      hits.push({ x: x, y: y, w: 78, h: h, act: 'testMenu' });
+    }
 
     // 第二排：辅助工具（托管 / 记牌 / 更多），右对齐，避开左侧标题与副标题
     var y2 = 72, h2 = 36, fs2 = 14, rad2 = 18, gap2 = 8;
@@ -3865,10 +3868,7 @@ module.exports = function (B) {
     var cw = land ? Math.max(700, Math.min(1040, state.W * 0.6)) : Math.min(640, state.W - 56);
     var cx = (state.W - cw) / 2;
 
-    var ty = land ? 72 : 150;
-    txt(ctx, '十三张 · 独食', state.W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
-    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', state.W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
-
+    // 主菜单内容整体居中：竖屏高屏不再把按钮顶在上半屏、下面留一大片空
     var lines = [
       '♦4 起手，第一手必须带 ♦4',
       '点数 3 最大、4 最小；花色 ♠ > ♥ > ♣ > ♦',
@@ -3877,8 +3877,17 @@ module.exports = function (B) {
       '第 2 局起进贡：胜方从败方抽牌，抽到身份牌亮出归还重抽'
     ];
     var lh = land ? 36 : 28;
-    var ry = ty + (land ? 86 : 84);
     var rh = lh * lines.length + (land ? 52 : 54);
+    var gapBefore = land ? 30 : 34;
+    var bh = land ? 96 : 88;
+    var contentH = 46 + 84 + rh + gapBefore + bh;
+    // 横屏牌桌内框顶边约 198：标题落在边框上方，玩法卡与按钮落进桌内
+    var ty = land ? 124 : Math.max(100, Math.round((H - contentH) / 2 + 46));
+
+    txt(ctx, '十三张 · 独食', state.W / 2, ty, land ? 64 : 46, C.gold, 'center', 700);
+    txt(ctx, '横县找朋友 · ♠3 与 ♠A 同持即独食', state.W / 2, ty + (land ? 54 : 48), land ? 22 : 16, C.dim);
+
+    var ry = ty + (land ? 86 : 84);
     box(ctx, cx, ry, cw, rh, 14, 'rgba(10,20,34,0.74)', C.panelLine);
     txt(ctx, '玩法', cx + (land ? 32 : 24), ry + (land ? 26 : 26), land ? 19 : 15, C.gold, 'left', 600);
     lines.forEach(function (l, i) {
@@ -3886,37 +3895,17 @@ module.exports = function (B) {
         ry + (land ? 58 : 56) + i * lh, land ? 23 : 14, C.text, 'left');
     });
 
-    var sy = ry + rh + (land ? 20 : 22);
-    var chips = [
-      { act: 'cfgRounds', label: '场次', value: S.rounds + ' 局' },
-      { act: 'cfgLevel', label: '对手', value: ['新手', '普通', '高手'][S.level] || '普通' },
-      { act: 'cfgTribute', label: '进贡', value: !S.cfg.tributeEnabled ? '关闭' : (S.cfg.tributeTier === 'heavy' ? '重贡 4/2' : '轻贡 2/1') }
-    ];
-    var gapC = 12;
-    var chipW = (cw - gapC * 2) / 3;
-    var chipH = land ? 80 : 66;
-    chips.forEach(function (c, i) {
-      var x = cx + i * (chipW + gapC);
-      box(ctx, x, sy, chipW, chipH, 12, 'rgba(10,20,34,0.82)', C.panelLine);
-      txt(ctx, c.label, x + chipW / 2, sy + chipH * 0.32, land ? 17 : 13, C.dim);
-      txt(ctx, c.value, x + chipW / 2, sy + chipH * 0.68, land ? 26 : 17, C.text, 'center', 600);
-      hits.push({ x: x, y: sy, w: chipW, h: chipH, act: c.act });
-    });
+    // 单机入口已取消：开始游戏直接进联机大厅，好友房和快速人机都在服务端房间里进行。
+    var by = ry + rh + gapBefore;
+    var bw = land ? Math.min(cw * 0.62, 700) : Math.min(cw, 460);
+    var bx = (state.W - bw) / 2;
+    box(ctx, bx, by, bw, bh, 14, C.gold, null);
+    txt(ctx, '开始游戏', state.W / 2, by + bh * 0.40 + 1, land ? 34 : 28, '#101f33', 'center', 700);
+    txt(ctx, '联机房间 · 好友或机器人', state.W / 2, by + bh * 0.72,
+      land ? 17 : 13.5, 'rgba(16,31,51,0.72)', 'center', 500);
+    hits.push({ x: bx, y: by, w: bw, h: bh, act: 'netOpen' });
 
-    var by = sy + chipH + (land ? 22 : 24);
-    var bw = land ? Math.min(cw * 0.56, 620) : Math.min(cw, 420);
-    var bh = land ? 86 : 74;
-    box(ctx, (state.W - bw) / 2, by, bw, bh, 14, C.gold, null);
-    txt(ctx, '开始游戏', state.W / 2, by + bh / 2 + 1, land ? 34 : 24, '#101f33', 'center', 700);
-    hits.push({ x: (state.W - bw) / 2, y: by, w: bw, h: bh, act: 'startGame' });
-
-    var ny = by + bh + (land ? 16 : 14);
-    var nh = land ? 64 : 58;
-    box(ctx, (state.W - bw) / 2, ny, bw, nh, 12, C.btn, C.panelLine);
-    txt(ctx, '联机对战', state.W / 2, ny + nh / 2 + 1, land ? 24 : 19, C.text, 'center', 600);
-    hits.push({ x: (state.W - bw) / 2, y: ny, w: bw, h: nh, act: 'netOpen' });
-
-    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', state.W / 2, Math.min(ny + nh + (land ? 34 : 36), H - 18), land ? 17 : 13, C.dim);
+    txt(ctx, '第 1 局不进贡 · 出牌逆时针 · 纯积分休闲娱乐，不涉及任何财物', state.W / 2, H - 18, land ? 17 : 13, C.dim);
   }
 
   function summary(ctx, S, L, hits) {
@@ -3982,38 +3971,78 @@ module.exports = function (B) {
   function lobbyPanel(ctx, S, L, hits) {
     var H = L.H;
     overlay(ctx, H, state.W, H);
-    var pw = 660, ph = S.lobby.kind === 'keypad' ? 660 : S.lobby.kind === 'config' ? 340 : 500;
+    var pw = 660;
+    var ph = S.lobby.kind === 'keypad' ? 660 : S.lobby.kind === 'config' ? 340 :
+      S.lobby.kind === 'quick' ? 430 : 560;
     var px = (state.W - pw) / 2, py = (H - ph) / 2 - ((state.W / H) >= 1.2 ? 20 : 0);
     if (py < 8) py = 8;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
     if (S.lobby.kind === 'entry') {
-      txt(ctx, '联机对战', state.W / 2, py + 56, 28, C.gold, 'center', 600);
-      txt(ctx, '同一台路由器内可直连；跨网需要 wss 域名', state.W / 2, py + 88, 14, C.dim);
+      txt(ctx, '选择牌桌', state.W / 2, py + 44, 27, C.gold, 'center', 600);
+      txt(ctx, '好友联机 / 快速人机 · 都在联机房间里进行', state.W / 2, py + 75, 14, C.dim);
       var srv = String(S.lobby.url || '');
       var srvW = Math.min(pw - 80, Math.max(240, (srv.length + 3) * 7.4));
       var srvX = (state.W - srvW) / 2;
-      box(ctx, srvX, py + 100, srvW, 32, 16, C.btn, C.panelLine);
-      txt(ctx, '服务器 ' + srv, state.W / 2, py + 121, 12.5, C.gold, 'center');
-      hits.push({ x: srvX, y: py + 100, w: srvW, h: 32, act: 'netServer' });
+      box(ctx, srvX, py + 92, srvW, 32, 16, C.btn, C.panelLine);
+      txt(ctx, '服务器 ' + srv, state.W / 2, py + 113, 12.5, C.gold, 'center');
+      hits.push({ x: srvX, y: py + 92, w: srvW, h: 32, act: 'netServer' });
 
-      var by = py + 168;
-      box(ctx, px + 40, by, pw - 80, 78, 12, C.gold, null);
-      txt(ctx, '创建房间', state.W / 2, by + 41, 24, '#101f33', 'center', 600);
-      hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netConfig' });
+      var by = py + 148;
+      box(ctx, px + 40, by, pw - 80, 86, 12, C.gold, null);
+      txt(ctx, '快速开局', state.W / 2, by + 33, 25, '#101f33', 'center', 600);
+      txt(ctx, '1 真人 + 3 机器人 · 8 局', state.W / 2, by + 64, 14, 'rgba(16,31,51,0.72)', 'center', 500);
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 86, act: 'netQuick' });
 
-      by += 96;
-      box(ctx, px + 40, by, pw - 80, 78, 12, C.btn, C.panelLine);
-      txt(ctx, '加入房间', state.W / 2, by + 41, 22, C.text, 'center', 600);
-      hits.push({ x: px + 40, y: by, w: pw - 80, h: 78, act: 'netKeypad' });
+      by += 98;
+      box(ctx, px + 40, by, pw - 80, 64, 12, C.btn, C.panelLine);
+      txt(ctx, '创建好友房', state.W / 2, by + 24, 20, C.text, 'center', 600);
+      txt(ctx, '设局数 / 进贡 / 限时，拿 4 位房号', state.W / 2, by + 46, 12.5, C.dim, 'center');
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 64, act: 'netConfig' });
 
-      by += 104;
-      txt(ctx, S.lobby.err || S.netStatus || '', state.W / 2, by, 15,
+      by += 74;
+      box(ctx, px + 40, by, pw - 80, 64, 12, C.btn, C.panelLine);
+      txt(ctx, '加入房间', state.W / 2, by + 24, 20, C.text, 'center', 600);
+      txt(ctx, '输入朋友发来的 4 位房号', state.W / 2, by + 46, 12.5, C.dim, 'center');
+      hits.push({ x: px + 40, y: by, w: pw - 80, h: 64, act: 'netKeypad' });
+
+      txt(ctx, S.lobby.err || S.netStatus || '', state.W / 2, by + 92, 14,
         S.lobby.err ? '#e8b0ae' : C.dim);
 
-      box(ctx, px + 150, py + ph - 92, pw - 300, 58, 10, C.btn, C.panelLine);
-      txt(ctx, '返回单机', state.W / 2, py + ph - 63, 18, C.text, 'center');
-      hits.push({ x: px + 150, y: py + ph - 92, w: pw - 300, h: 58, act: 'netBack' });
+      box(ctx, px + 150, py + ph - 80, pw - 300, 52, 10, C.btn, C.panelLine);
+      txt(ctx, '返回主界面', state.W / 2, py + ph - 54, 17, C.text, 'center');
+      hits.push({ x: px + 150, y: py + ph - 80, w: pw - 300, h: 52, act: 'netBack' });
+      return;
+    }
+
+    if (S.lobby.kind === 'quick') {
+      txt(ctx, '快速开局', state.W / 2, py + 46, 27, C.gold, 'center', 600);
+      txt(ctx, '1 真人 + 3 机器人 · 8 局 · 重贡', state.W / 2, py + 81, 14, C.dim);
+
+      var qsrvW = Math.min(pw - 90, Math.max(230, (String(S.lobby.url || '').length + 3) * 7.2));
+      box(ctx, (state.W - qsrvW) / 2, py + 108, qsrvW, 30, 15, C.btn, C.panelLine);
+      txt(ctx, '服务器 ' + String(S.lobby.url || ''), state.W / 2, py + 128, 12.5, C.gold, 'center');
+      hits.push({ x: (state.W - qsrvW) / 2, y: py + 108, w: qsrvW, h: 30, act: 'netServer' });
+
+      var qerr = S.lobby.err || '';
+      txt(ctx, qerr || '正在创建房间并补入机器人…', state.W / 2, py + 188, 15,
+        qerr ? '#e8b0ae' : C.text, 'center', qerr ? 500 : 400);
+      if (!qerr) {
+        txt(ctx, '开局后直接发牌；掉线可重连，座位会被机器人托管', state.W / 2, py + 214, 12.5, C.dim);
+      }
+
+      if (qerr) {
+        box(ctx, px + 40, py + 250, pw - 80, 58, 12, C.gold, null);
+        txt(ctx, '重新准备', state.W / 2, py + 279, 20, '#101f33', 'center', 600);
+        hits.push({ x: px + 40, y: py + 250, w: pw - 80, h: 58, act: 'netQuickRetry' });
+      } else {
+        txt(ctx, '●   ●   ●', state.W / 2, py + 272, 20, C.gold, 'center', 600);
+        txt(ctx, '请稍候', state.W / 2, py + 297, 12.5, C.dim, 'center');
+      }
+
+      box(ctx, px + 150, py + 330, pw - 300, 50, 10, C.btn, C.panelLine);
+      txt(ctx, '取消并返回主界面', state.W / 2, py + 355, 16, C.text, 'center');
+      hits.push({ x: px + 150, y: py + 330, w: pw - 300, h: 50, act: 'netQuickCancel' });
       return;
     }
 
@@ -4454,7 +4483,7 @@ module.exports = function (B) {
       hits.push({ x: px + 34, y: py + ph - 62, w: bwb, h: bhb, act: 'guidePrev' });
     }
     box(ctx, px + pw - 34 - bwb, py + ph - 62, bwb, bhb, 12, C.gold, null);
-    txt(ctx, page >= 2 ? '开始游戏' : '下一页', px + pw - 34 - bwb / 2, py + ph - 39, 16, '#101f33', 'center', 600);
+    txt(ctx, page >= 2 ? '知道了' : '下一页', px + pw - 34 - bwb / 2, py + ph - 39, 16, '#101f33', 'center', 600);
     hits.push({
       x: px + pw - 34 - bwb, y: py + ph - 62, w: bwb, h: bhb,
       act: page >= 2 ? 'guideDone' : 'guideNext'
@@ -4472,7 +4501,7 @@ module.exports = function (B) {
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     txt(ctx, '对局菜单', state.W / 2, py + 46, 22, C.gold, 'center', 600);
     var st = S.stats || {};
-    txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '单机 · 三家 AI') +
+    txt(ctx, (S.mode === 'online' ? '联机 · 房间 ' + (S.room || '-') : '试玩 · 三家 AI') +
       ' · 第 ' + Math.max(1, S.round) + '/' + S.rounds + ' 局 · 战绩 ' + (st.wins || 0) + ' 胜',
       state.W / 2, py + 72, 13, C.dim, 'center');
 
@@ -4515,7 +4544,7 @@ module.exports = function (B) {
     var ex = S.ask.kind === 'dissolve';
     txt(ctx, ex ? '解散房间？' : '退出本局？', state.W / 2, py + 56, 24, C.gold, 'center', 600);
     var sub = ex
-      ? '房间会关闭，四位玩家都回联机大厅'
+      ? '房间会关闭：你回主界面，其他人回联机大厅'
       : (S.mode === 'online'
         ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
         : '本局进度不保存，回到主界面');
@@ -4591,9 +4620,10 @@ define("js/views.js", function (require, module, exports) {
     var shk = fxShake(S);
     ctx.save();
     if (shk) ctx.translate(shk.x, shk.y);
-    bg(ctx, L);
+    bg(ctx, L, S.phase === 'menu' && !S.lobby ? { menu: true } : null);
     if (S.phase === 'menu' || (S.lobby && !S.game)) {
-      menu(ctx, S, L, hits);
+      // 大厅是独立页：不要把主菜单标题/玩法卡垫在弹层后面
+      if (!S.lobby) menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
       if (S.guideOpen) guidePanel(ctx, S, L, hits);
@@ -4683,7 +4713,7 @@ define("js/app.js", function (require, module, exports) {
     fx: {},
     audioOn: true,
     // 联机
-    mode: 'solo',
+    mode: 'menu',
     lobby: null,
     waitRoom: false,
     room: '',
@@ -5319,7 +5349,10 @@ define("js/app.js", function (require, module, exports) {
     });
     NET.on('error', function (e) {
       S.netStatus = '连接失败';
-      if (S.lobby) S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      if (S.lobby) {
+        S.lobby.busy = false;
+        S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      }
       P.markDirty();
     });
     NET.on('close', function () {
@@ -5329,12 +5362,16 @@ define("js/app.js", function (require, module, exports) {
         return;
       }
       if (S.leaving) { P.markDirty(); return; }   // 主动退房/回大厅：不要弹“连接断开”盖住操作提示
+      if (S.lobby) { S.lobby.busy = false; S.lobby.err = '连接断开，请重试'; }
       toast('连接断开');
       P.markDirty();
     });
     NET.on('error', function () {
       S.netStatus = '连接失败';
-      if (S.lobby) S.lobby.err = '连不上服务器：' + NET.defaultUrl();
+      if (S.lobby) {
+        S.lobby.busy = false;
+        S.lobby.err = '连不上服务器：' + NET.defaultUrl();
+      }
       P.markDirty();
     });
     NET.on('message', onNetMessage);
@@ -5374,6 +5411,8 @@ define("js/app.js", function (require, module, exports) {
 
   function openLobby() {
     S.mode = 'online';
+    S.leaving = false;
+    S.pending = null;
     S.waitRoom = false;
     S.lobby = { kind: 'entry', url: NET.defaultUrl(), err: '', code: '' };
     S.phase = 'lobby';
@@ -5381,32 +5420,12 @@ define("js/app.js", function (require, module, exports) {
     P.markDirty();
   }
 
-  // 回主界面：联机顺带退房；单机直接回标题
+  // 回主界面：所有对局都走联机房间，离开时退房并断开本局连接，回到主菜单重新选择
   function doExitHome() {
-    if (S.mode === 'online') {
-      backToSolo();
-      openLobby();            // 联机局内「主界面」→ 联机对战大厅（创建/加入房间），即截图那个界面
-      toast('已离开房间');
-      return;
-    }
-    clearTurnTimer();
-    clearTributeTimer();
-    SFX.flush();
-    if (dealTick) { clearInterval(dealTick); dealTick = null; }
-    S.phase = 'menu';
-    S.testMenu = false;
-    S.testDeck = false;
-    S.summary = false;
-    S.game = null;
-    S.deal = null;
-    S.tribute = null;
-    S.selected = [];
-    S.auto = false;
-    S.autoPending = false;
-    P.markDirty();
+    returnHome();
   }
 
-  function backToSolo() {
+  function returnHome() {
     var alreadyLeaving = S.leaving;
     S.leaving = true;
     S.reconnecting = false;
@@ -5417,9 +5436,13 @@ define("js/app.js", function (require, module, exports) {
       if (!alreadyLeaving) NET.send({ t: 'leave' });
       NET.close();
     }
+    clearTurnTimer();
+    clearTributeTimer();
     SFX.flush();
-    S.mode = 'solo';
+    if (dealTick) { clearInterval(dealTick); dealTick = null; }
+    S.mode = 'menu';
     S.lobby = null;
+    S.pending = null;
     S.waitRoom = false;
     S.netView = null;
     S.room = '';
@@ -5433,6 +5456,10 @@ define("js/app.js", function (require, module, exports) {
     S.deal = null;
     S.tribute = null;
     S.selected = [];
+    S.auto = false;
+    S.autoPending = false;
+    S.testMenu = false;
+    S.testDeck = false;
     P.markDirty();
   }
 
@@ -5457,10 +5484,32 @@ define("js/app.js", function (require, module, exports) {
     P.markDirty();
   }
 
+  // 快速开局：服务端一次完成「建房 → 补 3 个机器人 → 发牌」，不经过等待房
+  function netQuick() {
+    S.mode = 'online';
+    S.phase = 'lobby';
+    S.waitRoom = false;
+    S.leaving = false;
+    S.reconnectTries = 0;
+    S.lobby = { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' };
+    bindNet();
+    var ready = netJoinServer();
+    var msg = {
+      t: 'quick',
+      name: myName(),
+      rounds: 8,
+      cfg: { tributeTier: 'heavy', turnSeconds: 20, teamHint: 'none', testTribute: false }
+    };
+    if (ready) NET.send(msg); else S.pending = msg;
+    P.markDirty();
+  }
+
   function onNetMessage(m) {
     if (m.t === 'joined') {
+      var quickJoin = !!(S.lobby && S.lobby.kind === 'quick');
       S.room = m.room;
-      S.lobby = null;
+      // 快速局在 joined 之后马上发 state：保留准备面板直到 state 到达，避免闪一帧主菜单
+      S.lobby = quickJoin ? { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' } : null;
       if (m.key) {
         S.rejoin = { room: m.room, key: m.key };
         storageSet('gx13_rejoin', S.rejoin);
@@ -5469,7 +5518,7 @@ define("js/app.js", function (require, module, exports) {
       S.reconnecting = false;
       S.reconnectTries = 0;
       S.leaving = false;
-      toast(m.rejoin ? '已回到房间 ' + m.room : '已进入房间 ' + m.room);
+      toast(quickJoin ? '机器人已入座，开始发牌' : (m.rejoin ? '已回到房间 ' + m.room : '已进入房间 ' + m.room));
       P.markDirty();
       return;
     }
@@ -5480,8 +5529,8 @@ define("js/app.js", function (require, module, exports) {
       S.rejoin = null;
       try { storageSet('gx13_rejoin', null); } catch (e) {}
       if (S.mode === 'online') {
-        S.leaving = true;      // 房间映射已被服务端摘掉，backToSolo 不必再发 leave
-        backToSolo();
+        S.leaving = true;      // 房间映射已被服务端摘掉，returnHome 不必再发 leave
+        returnHome();
         openLobby();
         S.lobby.err = m.msg || '座位已在另一处登录';
         toast('座位已在另一处登录，本机已退出房间');
@@ -5498,7 +5547,8 @@ define("js/app.js", function (require, module, exports) {
         S.rejoin = null;
         try { storageSet('gx13_rejoin', null); } catch (e) {}
         if (S.mode === 'online') {
-          backToSolo();
+          S.leaving = true;      // 座位已失效，服务端没有可退的房间映射
+          returnHome();
           openLobby();
           S.lobby.err = m.msg || '座位已失效';
           toast('座位已失效，请重新进房');
@@ -5506,17 +5556,20 @@ define("js/app.js", function (require, module, exports) {
           return;
         }
       }
-      if (S.lobby) S.lobby.err = m.msg;
+      if (S.lobby) { S.lobby.busy = false; S.lobby.err = m.msg; }
       else toast(m.msg);
       P.markDirty();
       return;
     }
     if (m.t === 'roomClosed') {
-      // 房主解散了房间：所有人回联机大厅
-      backToSolo();
-      openLobby();
+      // 房主主动解散房间：自己也回主界面；其他被解散的玩家回大厅另找房间
+      var wasLeaving = !!S.leaving;
+      returnHome();
+      if (!wasLeaving) {
+        openLobby();
+        S.lobby.err = m.msg || '';
+      }
       toast(m.msg || '房间已解散');
-      S.lobby.err = m.msg || '';
       return;
     }
     if (m.t === 'state') { applyView(m); return; }  }
@@ -5535,6 +5588,7 @@ define("js/app.js", function (require, module, exports) {
 
   function applyView(v) {
     bindNet();
+    S.lobby = null;
     S.mode = 'online';
     S.netView = v;
     S.netStatus = '在线';
@@ -5724,8 +5778,9 @@ define("js/app.js", function (require, module, exports) {
     P.markDirty();
   }
 
-  // ---------- 开局 ----------
+  // ---------- 试玩/预览开局（正式产品不提供入口，只保留给无头测试与 demo）----------
   function newMatch() {
+    S.mode = 'solo';
     clearTurnTimer();
     clearTributeTimer();
     SFX.flush();
@@ -6305,30 +6360,9 @@ define("js/app.js", function (require, module, exports) {
   }
 
   function handleAct(h) {
-    if (h.act === 'startGame') { newMatch(); return; }
     if (h.act === 'netOpen') { openLobby(); return; }
-    if (h.act === 'cfgRounds') {
-      var ro = [8, 12, 16, 24, 32];
-      S.rounds = ro[(ro.indexOf(S.rounds) + 1) % ro.length];
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'cfgLevel') {
-      S.level = (S.level + 1) % 3;
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'cfgTribute') {
-      if (!S.cfg.tributeEnabled) { S.cfg.tributeEnabled = true; S.cfg.tributeTier = 'heavy'; }
-      else if (S.cfg.tributeTier === 'heavy') { S.cfg.tributeTier = 'light'; }
-      else { S.cfg.tributeEnabled = false; }
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'mode') {
-      if (S.mode === 'online') backToSolo(); else openLobby();
-      return;
-    }
+    if (h.act === 'netQuick' || h.act === 'netQuickRetry') { netQuick(); return; }
+    if (h.act === 'netQuickCancel') { S.leaving = true; returnHome(); return; }
     if (h.act === 'netCreate') { netCreate(); return; }
     if (h.act === 'netConfig') {
       S.lobby = { kind: 'config', url: NET.defaultUrl(), err: '', code: '' };
@@ -6347,18 +6381,23 @@ define("js/app.js", function (require, module, exports) {
     if (h.act === 'netCfgConfirm') { netCreate(); return; }
     if (h.act === 'netKeypad') { S.lobby = { kind: 'keypad', code: '', err: '' }; P.markDirty(); return; }
     if (h.act === 'netServer') {
+      var wasQuick = S.lobby && S.lobby.kind === 'quick';
       P.askText('联机服务器地址（ws:// 或 wss://）', NET.defaultUrl(), 80, function (v) {
         var s = String(v || '').trim();
         if (!s) return;
         try { if (typeof wx !== 'undefined' && wx.setStorageSync) wx.setStorageSync('gx13_server', s); } catch (e) {}
         try { if (typeof localStorage !== 'undefined') localStorage.setItem('gx13_server', s); } catch (e) {}
-        S.lobby = { kind: 'entry', url: s, err: '', code: '' };
-        P.markDirty();
+        if (wasQuick) {
+          netQuick();
+        } else {
+          S.lobby = { kind: 'entry', url: s, err: '', code: '' };
+          P.markDirty();
+        }
         toast('服务器已改为 ' + s);
       });
       return;
     }
-    if (h.act === 'netBack') { backToSolo(); return; }
+    if (h.act === 'netBack') { S.leaving = true; returnHome(); return; }
     if (h.act === 'netDigit') {
       if (S.lobby && S.lobby.code.length < 4) S.lobby.code += h.d;
       P.markDirty();
@@ -6377,7 +6416,7 @@ define("js/app.js", function (require, module, exports) {
     if (h.act === 'netJoin') { if (S.lobby) netJoin(S.lobby.code); return; }
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
-    if (h.act === 'netLeave') { backToSolo(); return; }
+    if (h.act === 'netLeave') { returnHome(); return; }
     if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
     if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
@@ -6416,20 +6455,18 @@ define("js/app.js", function (require, module, exports) {
       S.ask = null;
       if (kind === 'dissolve') {
         if (S.mode === 'online') {
+          S.leaving = true;       // 房主自己退房，不再等 roomClosed 回大厅
           NET.send({ t: 'dissolve' });
-          // 等一帧让消息先发出去，再关连接
-          setTimeout(function () { backToSolo(); openLobby(); }, 250);
+          setTimeout(returnHome, 200);   // 让 dissolve 先发出去，再关连接
         } else {
-          backToSolo();
-          openLobby();
+          returnHome();
         }
         toast('房间已解散');
         return;
       }
       if (S.mode === 'online') {
-        // 先告诉服务端「主动离开→座位转托管」，再回大厅
-        NET.send({ t: 'leave' });
-        setTimeout(function () { doExitHome(); }, 250);
+        // 让服务端先把座位转托管，再断开本局连接回到主界面
+        setTimeout(function () { doExitHome(); }, 180);
         toast('已退出，座位由机器人托管');
         return;
       }
@@ -6518,7 +6555,7 @@ define("js/app.js", function (require, module, exports) {
     if (h.act === 'toMenu') {
       // 联机总结页点「回到开始界面」必须真正退房：只改本地 phase 会留下幽灵座位，
       // 房主还占着房，其他人既开不了新局也等不到房主
-      if (S.mode === 'online') { backToSolo(); return; }
+      if (S.mode === 'online') { returnHome(); return; }
       clearTurnTimer();
       clearTributeTimer();
       S.phase = 'menu';
@@ -6668,10 +6705,22 @@ define("js/app.js", function (require, module, exports) {
     if (typeof window !== 'undefined' && window.location &&
         /demo=flight/.test(window.location.search || '')) { demoFlight(); return; }
     if (typeof window !== 'undefined' && window.location &&
-        /demo=lobby/.test(window.location.search || '')) { newMatch(); openLobby(); return; }
+        /demo=lobby/.test(window.location.search || '')) { openLobby(); return; }
+    if (typeof window !== 'undefined' && window.location &&
+        /demo=quickErr/.test(window.location.search || '')) {
+      openLobby();
+      S.lobby = { kind: 'quick', busy: false, err: '连不上服务器：' + NET.defaultUrl(), url: NET.defaultUrl(), code: '' };
+      P.markDirty(); return;
+    }
+    if (typeof window !== 'undefined' && window.location &&
+        /demo=quick/.test(window.location.search || '')) {
+      openLobby();
+      S.lobby = { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' };
+      P.markDirty(); return;
+    }
     if (typeof window !== 'undefined' && window.location &&
         /demo=cfg/.test(window.location.search || '')) {
-      newMatch(); openLobby();
+      openLobby();
       S.lobby = { kind: 'config', url: NET.defaultUrl(), err: '', code: '' };
       S.mode = 'online'; P.markDirty(); return;
     }
@@ -6679,7 +6728,7 @@ define("js/app.js", function (require, module, exports) {
         /demo=online/.test(window.location.search || '')) { demoOnline(); return; }
     if (typeof window !== 'undefined' && window.location &&
         /demo=keypad/.test(window.location.search || '')) {
-      newMatch(); openLobby(); S.lobby = { kind: 'keypad', code: '12', err: '' }; P.markDirty(); return;
+      openLobby(); S.lobby = { kind: 'keypad', code: '12', err: '' }; P.markDirty(); return;
     }
 
     var joinCode = '';

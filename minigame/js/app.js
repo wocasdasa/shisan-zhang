@@ -34,7 +34,7 @@
     fx: {},
     audioOn: true,
     // 联机
-    mode: 'solo',
+    mode: 'menu',
     lobby: null,
     waitRoom: false,
     room: '',
@@ -670,7 +670,10 @@
     });
     NET.on('error', function (e) {
       S.netStatus = '连接失败';
-      if (S.lobby) S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      if (S.lobby) {
+        S.lobby.busy = false;
+        S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+      }
       P.markDirty();
     });
     NET.on('close', function () {
@@ -680,12 +683,16 @@
         return;
       }
       if (S.leaving) { P.markDirty(); return; }   // 主动退房/回大厅：不要弹“连接断开”盖住操作提示
+      if (S.lobby) { S.lobby.busy = false; S.lobby.err = '连接断开，请重试'; }
       toast('连接断开');
       P.markDirty();
     });
     NET.on('error', function () {
       S.netStatus = '连接失败';
-      if (S.lobby) S.lobby.err = '连不上服务器：' + NET.defaultUrl();
+      if (S.lobby) {
+        S.lobby.busy = false;
+        S.lobby.err = '连不上服务器：' + NET.defaultUrl();
+      }
       P.markDirty();
     });
     NET.on('message', onNetMessage);
@@ -725,6 +732,8 @@
 
   function openLobby() {
     S.mode = 'online';
+    S.leaving = false;
+    S.pending = null;
     S.waitRoom = false;
     S.lobby = { kind: 'entry', url: NET.defaultUrl(), err: '', code: '' };
     S.phase = 'lobby';
@@ -732,32 +741,12 @@
     P.markDirty();
   }
 
-  // 回主界面：联机顺带退房；单机直接回标题
+  // 回主界面：所有对局都走联机房间，离开时退房并断开本局连接，回到主菜单重新选择
   function doExitHome() {
-    if (S.mode === 'online') {
-      backToSolo();
-      openLobby();            // 联机局内「主界面」→ 联机对战大厅（创建/加入房间），即截图那个界面
-      toast('已离开房间');
-      return;
-    }
-    clearTurnTimer();
-    clearTributeTimer();
-    SFX.flush();
-    if (dealTick) { clearInterval(dealTick); dealTick = null; }
-    S.phase = 'menu';
-    S.testMenu = false;
-    S.testDeck = false;
-    S.summary = false;
-    S.game = null;
-    S.deal = null;
-    S.tribute = null;
-    S.selected = [];
-    S.auto = false;
-    S.autoPending = false;
-    P.markDirty();
+    returnHome();
   }
 
-  function backToSolo() {
+  function returnHome() {
     var alreadyLeaving = S.leaving;
     S.leaving = true;
     S.reconnecting = false;
@@ -768,9 +757,13 @@
       if (!alreadyLeaving) NET.send({ t: 'leave' });
       NET.close();
     }
+    clearTurnTimer();
+    clearTributeTimer();
     SFX.flush();
-    S.mode = 'solo';
+    if (dealTick) { clearInterval(dealTick); dealTick = null; }
+    S.mode = 'menu';
     S.lobby = null;
+    S.pending = null;
     S.waitRoom = false;
     S.netView = null;
     S.room = '';
@@ -784,6 +777,10 @@
     S.deal = null;
     S.tribute = null;
     S.selected = [];
+    S.auto = false;
+    S.autoPending = false;
+    S.testMenu = false;
+    S.testDeck = false;
     P.markDirty();
   }
 
@@ -808,10 +805,32 @@
     P.markDirty();
   }
 
+  // 快速开局：服务端一次完成「建房 → 补 3 个机器人 → 发牌」，不经过等待房
+  function netQuick() {
+    S.mode = 'online';
+    S.phase = 'lobby';
+    S.waitRoom = false;
+    S.leaving = false;
+    S.reconnectTries = 0;
+    S.lobby = { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' };
+    bindNet();
+    var ready = netJoinServer();
+    var msg = {
+      t: 'quick',
+      name: myName(),
+      rounds: 8,
+      cfg: { tributeTier: 'heavy', turnSeconds: 20, teamHint: 'none', testTribute: false }
+    };
+    if (ready) NET.send(msg); else S.pending = msg;
+    P.markDirty();
+  }
+
   function onNetMessage(m) {
     if (m.t === 'joined') {
+      var quickJoin = !!(S.lobby && S.lobby.kind === 'quick');
       S.room = m.room;
-      S.lobby = null;
+      // 快速局在 joined 之后马上发 state：保留准备面板直到 state 到达，避免闪一帧主菜单
+      S.lobby = quickJoin ? { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' } : null;
       if (m.key) {
         S.rejoin = { room: m.room, key: m.key };
         storageSet('gx13_rejoin', S.rejoin);
@@ -820,7 +839,7 @@
       S.reconnecting = false;
       S.reconnectTries = 0;
       S.leaving = false;
-      toast(m.rejoin ? '已回到房间 ' + m.room : '已进入房间 ' + m.room);
+      toast(quickJoin ? '机器人已入座，开始发牌' : (m.rejoin ? '已回到房间 ' + m.room : '已进入房间 ' + m.room));
       P.markDirty();
       return;
     }
@@ -831,8 +850,8 @@
       S.rejoin = null;
       try { storageSet('gx13_rejoin', null); } catch (e) {}
       if (S.mode === 'online') {
-        S.leaving = true;      // 房间映射已被服务端摘掉，backToSolo 不必再发 leave
-        backToSolo();
+        S.leaving = true;      // 房间映射已被服务端摘掉，returnHome 不必再发 leave
+        returnHome();
         openLobby();
         S.lobby.err = m.msg || '座位已在另一处登录';
         toast('座位已在另一处登录，本机已退出房间');
@@ -849,7 +868,8 @@
         S.rejoin = null;
         try { storageSet('gx13_rejoin', null); } catch (e) {}
         if (S.mode === 'online') {
-          backToSolo();
+          S.leaving = true;      // 座位已失效，服务端没有可退的房间映射
+          returnHome();
           openLobby();
           S.lobby.err = m.msg || '座位已失效';
           toast('座位已失效，请重新进房');
@@ -857,17 +877,20 @@
           return;
         }
       }
-      if (S.lobby) S.lobby.err = m.msg;
+      if (S.lobby) { S.lobby.busy = false; S.lobby.err = m.msg; }
       else toast(m.msg);
       P.markDirty();
       return;
     }
     if (m.t === 'roomClosed') {
-      // 房主解散了房间：所有人回联机大厅
-      backToSolo();
-      openLobby();
+      // 房主主动解散房间：自己也回主界面；其他被解散的玩家回大厅另找房间
+      var wasLeaving = !!S.leaving;
+      returnHome();
+      if (!wasLeaving) {
+        openLobby();
+        S.lobby.err = m.msg || '';
+      }
       toast(m.msg || '房间已解散');
-      S.lobby.err = m.msg || '';
       return;
     }
     if (m.t === 'state') { applyView(m); return; }  }
@@ -886,6 +909,7 @@
 
   function applyView(v) {
     bindNet();
+    S.lobby = null;
     S.mode = 'online';
     S.netView = v;
     S.netStatus = '在线';
@@ -1075,8 +1099,9 @@
     P.markDirty();
   }
 
-  // ---------- 开局 ----------
+  // ---------- 试玩/预览开局（正式产品不提供入口，只保留给无头测试与 demo）----------
   function newMatch() {
+    S.mode = 'solo';
     clearTurnTimer();
     clearTributeTimer();
     SFX.flush();
@@ -1656,30 +1681,9 @@
   }
 
   function handleAct(h) {
-    if (h.act === 'startGame') { newMatch(); return; }
     if (h.act === 'netOpen') { openLobby(); return; }
-    if (h.act === 'cfgRounds') {
-      var ro = [8, 12, 16, 24, 32];
-      S.rounds = ro[(ro.indexOf(S.rounds) + 1) % ro.length];
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'cfgLevel') {
-      S.level = (S.level + 1) % 3;
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'cfgTribute') {
-      if (!S.cfg.tributeEnabled) { S.cfg.tributeEnabled = true; S.cfg.tributeTier = 'heavy'; }
-      else if (S.cfg.tributeTier === 'heavy') { S.cfg.tributeTier = 'light'; }
-      else { S.cfg.tributeEnabled = false; }
-      P.markDirty();
-      return;
-    }
-    if (h.act === 'mode') {
-      if (S.mode === 'online') backToSolo(); else openLobby();
-      return;
-    }
+    if (h.act === 'netQuick' || h.act === 'netQuickRetry') { netQuick(); return; }
+    if (h.act === 'netQuickCancel') { S.leaving = true; returnHome(); return; }
     if (h.act === 'netCreate') { netCreate(); return; }
     if (h.act === 'netConfig') {
       S.lobby = { kind: 'config', url: NET.defaultUrl(), err: '', code: '' };
@@ -1698,18 +1702,23 @@
     if (h.act === 'netCfgConfirm') { netCreate(); return; }
     if (h.act === 'netKeypad') { S.lobby = { kind: 'keypad', code: '', err: '' }; P.markDirty(); return; }
     if (h.act === 'netServer') {
+      var wasQuick = S.lobby && S.lobby.kind === 'quick';
       P.askText('联机服务器地址（ws:// 或 wss://）', NET.defaultUrl(), 80, function (v) {
         var s = String(v || '').trim();
         if (!s) return;
         try { if (typeof wx !== 'undefined' && wx.setStorageSync) wx.setStorageSync('gx13_server', s); } catch (e) {}
         try { if (typeof localStorage !== 'undefined') localStorage.setItem('gx13_server', s); } catch (e) {}
-        S.lobby = { kind: 'entry', url: s, err: '', code: '' };
-        P.markDirty();
+        if (wasQuick) {
+          netQuick();
+        } else {
+          S.lobby = { kind: 'entry', url: s, err: '', code: '' };
+          P.markDirty();
+        }
         toast('服务器已改为 ' + s);
       });
       return;
     }
-    if (h.act === 'netBack') { backToSolo(); return; }
+    if (h.act === 'netBack') { S.leaving = true; returnHome(); return; }
     if (h.act === 'netDigit') {
       if (S.lobby && S.lobby.code.length < 4) S.lobby.code += h.d;
       P.markDirty();
@@ -1728,7 +1737,7 @@
     if (h.act === 'netJoin') { if (S.lobby) netJoin(S.lobby.code); return; }
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
-    if (h.act === 'netLeave') { backToSolo(); return; }
+    if (h.act === 'netLeave') { returnHome(); return; }
     if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
     if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
@@ -1767,20 +1776,18 @@
       S.ask = null;
       if (kind === 'dissolve') {
         if (S.mode === 'online') {
+          S.leaving = true;       // 房主自己退房，不再等 roomClosed 回大厅
           NET.send({ t: 'dissolve' });
-          // 等一帧让消息先发出去，再关连接
-          setTimeout(function () { backToSolo(); openLobby(); }, 250);
+          setTimeout(returnHome, 200);   // 让 dissolve 先发出去，再关连接
         } else {
-          backToSolo();
-          openLobby();
+          returnHome();
         }
         toast('房间已解散');
         return;
       }
       if (S.mode === 'online') {
-        // 先告诉服务端「主动离开→座位转托管」，再回大厅
-        NET.send({ t: 'leave' });
-        setTimeout(function () { doExitHome(); }, 250);
+        // 让服务端先把座位转托管，再断开本局连接回到主界面
+        setTimeout(function () { doExitHome(); }, 180);
         toast('已退出，座位由机器人托管');
         return;
       }
@@ -1869,7 +1876,7 @@
     if (h.act === 'toMenu') {
       // 联机总结页点「回到开始界面」必须真正退房：只改本地 phase 会留下幽灵座位，
       // 房主还占着房，其他人既开不了新局也等不到房主
-      if (S.mode === 'online') { backToSolo(); return; }
+      if (S.mode === 'online') { returnHome(); return; }
       clearTurnTimer();
       clearTributeTimer();
       S.phase = 'menu';
@@ -2019,10 +2026,22 @@
     if (typeof window !== 'undefined' && window.location &&
         /demo=flight/.test(window.location.search || '')) { demoFlight(); return; }
     if (typeof window !== 'undefined' && window.location &&
-        /demo=lobby/.test(window.location.search || '')) { newMatch(); openLobby(); return; }
+        /demo=lobby/.test(window.location.search || '')) { openLobby(); return; }
+    if (typeof window !== 'undefined' && window.location &&
+        /demo=quickErr/.test(window.location.search || '')) {
+      openLobby();
+      S.lobby = { kind: 'quick', busy: false, err: '连不上服务器：' + NET.defaultUrl(), url: NET.defaultUrl(), code: '' };
+      P.markDirty(); return;
+    }
+    if (typeof window !== 'undefined' && window.location &&
+        /demo=quick/.test(window.location.search || '')) {
+      openLobby();
+      S.lobby = { kind: 'quick', busy: true, err: '', url: NET.defaultUrl(), code: '' };
+      P.markDirty(); return;
+    }
     if (typeof window !== 'undefined' && window.location &&
         /demo=cfg/.test(window.location.search || '')) {
-      newMatch(); openLobby();
+      openLobby();
       S.lobby = { kind: 'config', url: NET.defaultUrl(), err: '', code: '' };
       S.mode = 'online'; P.markDirty(); return;
     }
@@ -2030,7 +2049,7 @@
         /demo=online/.test(window.location.search || '')) { demoOnline(); return; }
     if (typeof window !== 'undefined' && window.location &&
         /demo=keypad/.test(window.location.search || '')) {
-      newMatch(); openLobby(); S.lobby = { kind: 'keypad', code: '12', err: '' }; P.markDirty(); return;
+      openLobby(); S.lobby = { kind: 'keypad', code: '12', err: '' }; P.markDirty(); return;
     }
 
     var joinCode = '';

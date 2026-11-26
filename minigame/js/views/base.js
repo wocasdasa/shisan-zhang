@@ -105,7 +105,7 @@ module.exports = function () {
     ctx.fillText(s, x, y);
   }
 
-  function bg(ctx, L) {
+  function bg(ctx, L, opt) {
     var H = L.H;
     var g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, C.bg1);
@@ -116,11 +116,13 @@ module.exports = function () {
 
     // 牌桌内框：顶边起于顶排座位牌之下（竖横屏同一来源，见 layout 的 tableTop）
     var pad = 48;
+    var bottom = L.table.bottom;
+    if (opt && opt.menu && L.landscape) bottom = H - 84; // 主菜单横屏：内框包住「开始游戏」按钮
     var inner = {
       x: pad,
       y: L.table.top,
       w: state.W - pad * 2,
-      h: L.table.bottom - L.table.top
+      h: bottom - L.table.top
     };
     box(ctx, inner.x, inner.y, inner.w, inner.h, 26, null, 'rgba(216,179,106,0.16)');
 

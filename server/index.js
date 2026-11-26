@@ -249,6 +249,13 @@ function createRoom(conn, msg) {
   return room;
 }
 
+// 快速人机局：建房、占住座位、空位补机器人、直接发牌，一次协议往返完成。
+// 不能走客户端 create→start：中间会经过等待房，既多一屏，也给别的玩家留了抢座窗口。
+function quickRoom(conn, msg) {
+  const room = createRoom(conn, msg);
+  if (room) startRoom(room);
+}
+
 function joinRoom(conn, msg) {
   const room = rooms.get(String(msg.room || '').trim());
   if (!room) { send(conn, { t: 'err', msg: '房间不存在' }); return; }
@@ -852,6 +859,7 @@ function nextRound(room) {
 function handle(conn, msg) {
   if (!msg || !msg.t) return;
   if (msg.t === 'create') { createRoom(conn, msg); return; }
+  if (msg.t === 'quick') { quickRoom(conn, msg); return; }
   if (msg.t === 'join') { joinRoom(conn, msg); return; }
   if (msg.t === 'rejoin') { rejoinRoom(conn, msg); return; }
   if (msg.t === 'ping') { send(conn, { t: 'pong', time: Date.now() }); return; }

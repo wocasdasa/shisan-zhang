@@ -49,9 +49,10 @@
     var shk = fxShake(S);
     ctx.save();
     if (shk) ctx.translate(shk.x, shk.y);
-    bg(ctx, L);
+    bg(ctx, L, S.phase === 'menu' && !S.lobby ? { menu: true } : null);
     if (S.phase === 'menu' || (S.lobby && !S.game)) {
-      menu(ctx, S, L, hits);
+      // 大厅是独立页：不要把主菜单标题/玩法卡垫在弹层后面
+      if (!S.lobby) menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
       if (S.guideOpen) guidePanel(ctx, S, L, hits);

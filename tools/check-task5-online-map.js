@@ -346,8 +346,32 @@ function run() {
   ok(tm, 'J: 总结页应有「回到开始界面」热区');
   sent.length = 0;
   if (tm) window.__gx.onTap(tm.x + tm.w / 2, tm.y + tm.h / 2);
-  ok(sent.some(x => x.t === 'leave') && S.mode === 'solo' && !S.room && !S.summary,
-    'J: 应发送 leave 并回到单机开始界面，实际 sent=' + JSON.stringify(sent) + ' mode=' + S.mode + ' room=' + S.room + ' summary=' + S.summary);
+  ok(sent.some(x => x.t === 'leave') && S.mode === 'menu' && !S.room && !S.summary,
+    'J: 应发送 leave 并回到主界面，实际 sent=' + JSON.stringify(sent) + ' mode=' + S.mode + ' room=' + S.room + ' summary=' + S.summary);
+
+  // ---- 场景 K：主菜单不再暴露单机开局，只有进入联机大厅的唯一入口 ----
+  const rMenu = render(S);
+  S.hits = rMenu.hits;
+  const menuHits = rMenu.hits;
+  const menuTx = textsOf(rMenu.rec);
+  ok(!menuHits.some(h => h.act === 'startGame'), 'K: 主菜单不应再有单机 startGame 热区');
+  ok(menuHits.some(h => h.act === 'netOpen'), 'K: 主菜单应有「开始游戏」→ 联机大厅热区');
+  ok(!menuTx.some(t => t.indexOf('单机') >= 0), 'K: 主菜单不应出现「单机」字样，实际 ' + menuTx.join('|'));
+
+  // ---- 场景 L：大厅提供快速开局，且客户端发的是原子 quick 协议 ----
+  tap('netOpen');
+  ok(S.lobby && S.lobby.kind === 'entry', 'L: 应进入联机大厅，实际 ' + JSON.stringify(S.lobby));
+  const rEntry = render(S);
+  S.hits = rEntry.hits;
+  ok(rEntry.hits.some(h => h.act === 'netQuick'), 'L: 大厅应有「快速开局」热区');
+  ok(rEntry.hits.some(h => h.act === 'netConfig'), 'L: 大厅应保留「创建好友房」热区');
+  ok(rEntry.hits.some(h => h.act === 'netKeypad'), 'L: 大厅应保留「加入房间」热区');
+  sent.length = 0;
+  tap('netQuick');
+  const quickMsg = sent.filter(x => x.t === 'quick')[0] || (S.pending && S.pending.t === 'quick' ? S.pending : null);
+  ok(quickMsg && quickMsg.rounds === 8 && quickMsg.cfg && quickMsg.cfg.tributeTier === 'heavy',
+    'L: 快速开局应发 {t:"quick",rounds:8,重贡}，实际 sent=' + JSON.stringify(sent) + ' pending=' + JSON.stringify(S.pending));
+  ok(S.lobby && S.lobby.kind === 'quick', 'L: 点快速开局后应显示准备面板，实际 ' + JSON.stringify(S.lobby));
 
   const lines = [];
   lines.push('场景A（独食抽牌方向 cap/got/置灰/热区抑制）: ' + (fails.filter(f => f[0] === 'A').length ? 'FAIL' : 'PASS'));
@@ -360,6 +384,8 @@ function run() {
   lines.push('场景H（总结页再来一场 next 协议）: ' + (fails.filter(f => f[0] === 'H').length ? 'FAIL' : 'PASS'));
   lines.push('场景I（superseded 清凭据回大厅）: ' + (fails.filter(f => f[0] === 'I').length ? 'FAIL' : 'PASS'));
   lines.push('场景J（总结页回开始界面退房）: ' + (fails.filter(f => f[0] === 'J').length ? 'FAIL' : 'PASS'));
+  lines.push('场景K（主菜单无单机入口）: ' + (fails.filter(f => f[0] === 'K').length ? 'FAIL' : 'PASS'));
+  lines.push('场景L（大厅快速开局 quick 协议）: ' + (fails.filter(f => f[0] === 'L').length ? 'FAIL' : 'PASS'));
   if (fails.length) { lines.push('FAILURES:'); fails.forEach(f => lines.push(' - ' + f)); }
   else lines.push('CHECK-PASS');
   console.log(lines.join('\n'));

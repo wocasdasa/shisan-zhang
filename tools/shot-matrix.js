@@ -11,6 +11,7 @@ const { spawn } = require('child_process');
 const Client = require('./wsclient.js');
 
 const MODES = [
+  'demo=menu',
   'demo=testHand',
   'demo=tribute',
   'demo=pullTest&stage=draw',
@@ -22,6 +23,8 @@ const MODES = [
   'demo=lone&seat=2',
   'demo=flight',
   'demo=lobby',
+  'demo=quick',
+  'demo=quickErr',
   'demo=cfg',
   'demo=keypad',
   'demo=online',
