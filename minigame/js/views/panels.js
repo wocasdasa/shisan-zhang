@@ -575,57 +575,86 @@ module.exports = function (B) {
   }
 
   function chatPanel(ctx, S, L, hits) {
-    var H = L.H;
-    overlay(ctx, H, state.W, H);
-    var pw = 640, ph = 668;
-    var px = (state.W - pw) / 2, py = Math.max(16, (H - ph) / 2);
-    box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
-    txt(ctx, '发言', state.W / 2, py + 40, 22, C.gold, 'center', 600);
+    if (!S.chatOpen) return;
+    // 常驻右侧的轻量发言浮层：不铺全屏、不压手牌/操作条，打开时仍可继续出牌
+    var pw = Math.min(320, state.W - 32);
+    var ph = 300;
+    var px = state.W - 16 - pw;
+    var py = Math.max(L.table.top + 8, L.actions.y - 12 - ph);
+    var panelH = Math.min(ph, L.actions.y - 12 - py);
+    if (S.chatT0) {
+      var q = Math.min(1, (Date.now() - S.chatT0) / 190);
+      px += Math.round((1 - (1 - Math.pow(1 - q, 3))) * (pw + 20));
+    }
+    box(ctx, px, py, pw, panelH, 14, C.panel, C.panelLine);
+    hits.push({ x: px, y: py, w: pw, h: panelH, act: 'chatPanel' });
 
-    // 最近 5 条
-    var msgs = (S.chats || []).slice(-5);
+    txt(ctx, '发言', px + 14, py + 21, 18, C.gold, 'left', 600);
+    var closeW = 34, closeH = 30;
+    box(ctx, px + pw - closeW - 8, py + 7, closeW, closeH, 8, 'rgba(216,179,106,0.12)', C.panelLine);
+    txt(ctx, '×', px + pw - closeW / 2 - 8, py + 7 + closeH / 2, 18, C.dim, 'center');
+    hits.push({ x: px + pw - closeW - 8, y: py + 7, w: closeW, h: closeH, act: 'chatClose' });
+
+    // 最近两条：自己的发言用金色，别人的保持正文色；面板窄时裁掉溢出
+    var msgs = (S.chats || []).slice(-2);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px + 14, py + 36, pw - 28, 32);
+    ctx.clip();
     if (!msgs.length) {
-      txt(ctx, '还没人说话，点下面的表情、短语或「打字」发一句', state.W / 2, py + 100, 14, C.dim);
+      txt(ctx, '还没人说话', px + 14, py + 48, 12, C.dim, 'left');
     } else {
       msgs.forEach(function (c, i) {
-        var y = py + 80 + i * 23;
-        txt(ctx, chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text,
-          px + 28, y, c.kind === 'emoji' ? 18 : 14, c.rel === 0 ? C.gold : C.text, 'left');
+        var line = chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text;
+        txt(ctx, line, px + 14, py + 42 + i * 15, 11, c.rel === 0 ? C.gold : C.text, 'left');
+      });
+    }
+    ctx.restore();
+
+    // 表情 / 短语页签：小面板只展示一页，避免把 16 个表情全摊开压住牌桌
+    var tabW = Math.round((pw - 28 - 8) / 2), tabH = 26, tabY = py + 70;
+    box(ctx, px + 14, tabY, tabW, tabH, 8,
+      (S.chatTab || 'emoji') === 'emoji' ? 'rgba(216,179,106,0.18)' : C.btn,
+      (S.chatTab || 'emoji') === 'emoji' ? C.gold : C.panelLine);
+    txt(ctx, '表情', px + 14 + tabW / 2, tabY + tabH / 2, 12,
+      (S.chatTab || 'emoji') === 'emoji' ? C.gold : C.text, 'center', 600);
+    hits.push({ x: px + 14, y: tabY, w: tabW, h: tabH, act: 'chatTabEmoji' });
+
+    box(ctx, px + 14 + tabW + 8, tabY, tabW, tabH, 8,
+      (S.chatTab || 'emoji') === 'phrase' ? 'rgba(216,179,106,0.18)' : C.btn,
+      (S.chatTab || 'emoji') === 'phrase' ? C.gold : C.panelLine);
+    txt(ctx, '短语', px + 14 + tabW + 8 + tabW / 2, tabY + tabH / 2, 12,
+      (S.chatTab || 'emoji') === 'phrase' ? C.gold : C.text, 'center', 600);
+    hits.push({ x: px + 14 + tabW + 8, y: tabY, w: tabW, h: tabH, act: 'chatTabPhrase' });
+
+    var gridY = py + 102;
+    if ((S.chatTab || 'emoji') === 'emoji') {
+      var ec = (S.chatEmoji || []).slice(0, 16);
+      var cols = 4, cellW = (pw - 28 - 18) / 4, cellH = 30, gap = 6;
+      ec.forEach(function (e, i) {
+        var c = i % cols, r = Math.floor(i / cols);
+        var x = px + 14 + c * (cellW + gap), y = gridY + r * (cellH + gap);
+        box(ctx, x, y, cellW, cellH, 8, C.btn, C.panelLine);
+        txt(ctx, e, x + cellW / 2, y + cellH / 2, 19, C.text, 'center');
+        hits.push({ x: x, y: y, w: cellW, h: cellH, act: 'chatEmoji', text: e });
+      });
+    } else {
+      var phs = (S.chatPhrases || []).slice(0, 8);
+      var cols2 = 2, cellW2 = (pw - 28 - 6) / 2, cellH2 = 30, gap2 = 6;
+      phs.forEach(function (p, i) {
+        var c = i % cols2, r = Math.floor(i / cols2);
+        var x = px + 14 + c * (cellW2 + gap2), y = gridY + r * (cellH2 + gap2);
+        box(ctx, x, y, cellW2, cellH2, 8, C.btn, C.panelLine);
+        txt(ctx, p, x + cellW2 / 2, y + cellH2 / 2, 13, C.text, 'center');
+        hits.push({ x: x, y: y, w: cellW2, h: cellH2, act: 'chatText', text: p });
       });
     }
 
-    // 打字发言（自己的话一定看得见）
-    var typeY = py + 190, typeH = 44;
-    box(ctx, px + 24, typeY, pw - 48, typeH, 12, C.btn, C.panelLine);
-    txt(ctx, '✎ 打字发言（≤16 字）', px + pw / 2, typeY + typeH / 2, 15, C.text, 'center', 600);
-    hits.push({ x: px + 24, y: typeY, w: pw - 48, h: typeH, act: 'chatType' });
-
-    // 表情：8×2
-    var ec = (S.chatEmoji || []);
-    var cellW = 68, cellH = 50, gx0 = px + (pw - cellW * 8) / 2, gy0 = py + 250;
-    ec.slice(0, 16).forEach(function (e, i) {
-      var c = i % 8, r = Math.floor(i / 8);
-      var x = gx0 + c * cellW, y = gy0 + r * cellH;
-      box(ctx, x + 4, y + 2, cellW - 8, cellH - 8, 10, C.btn, C.panelLine);
-      txt(ctx, e, x + cellW / 2, y + cellH / 2 - 2, 26, C.text, 'center');
-      hits.push({ x: x + 4, y: y + 2, w: cellW - 8, h: cellH - 8, act: 'chatEmoji', text: e });
-    });
-
-    // 短语：2×4
-    var phs = (S.chatPhrases || []);
-    var bw2 = 280, bh2 = 42, gx1 = state.W / 2 - bw2 - 10, gy1 = py + 366;
-    phs.slice(0, 8).forEach(function (p, i) {
-      var c = i % 2, r = Math.floor(i / 2);
-      var x = c ? state.W / 2 + 10 : gx1, y = gy1 + r * 50;
-      box(ctx, x, y, bw2, bh2, 12, C.btn, C.panelLine);
-      txt(ctx, p, x + bw2 / 2, y + bh2 / 2, 15, C.text, 'center');
-      hits.push({ x: x, y: y, w: bw2, h: bh2, act: 'chatText', text: p });
-    });
-
-    // 关闭
-    box(ctx, state.W / 2 - 110, py + ph - 60, 220, 46, 12, C.btn, C.panelLine);
-    txt(ctx, '关闭', state.W / 2, py + ph - 37, 16, C.text, 'center', 600);
-    hits.push({ x: state.W / 2 - 110, y: py + ph - 60, w: 220, h: 46, act: 'chatClose' });
+    // 打字入口固定在小面板底部
+    var typeY = py + panelH - 38, typeH = 30;
+    box(ctx, px + 14, typeY, pw - 28, typeH, 8, C.btn, C.panelLine);
+    txt(ctx, '✎ 打字发言（≤16 字）', px + pw / 2, typeY + typeH / 2, 12, C.text, 'center', 600);
+    hits.push({ x: px + 14, y: typeY, w: pw - 28, h: typeH, act: 'chatType' });
   }
 
   // 牌桌上冒出的最近发言（8 秒内、最多 3 条），从手牌左侧向上堆

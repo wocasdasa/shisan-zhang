@@ -584,12 +584,13 @@ module.exports = function (B) {
     clockChip(ctx, bx + 26, barY + barH / 2, 14, S.timer.left, S.phase === 'play');
   }
 
-  // 发言入口（联机）：常驻在操作带最右侧，不随「轮到你」显隐
+  // 发言入口（联机）：固定在屏幕右下角、手牌下方，不占操作条、不压手牌
   function chatEntry(ctx, S, L, hits) {
     if (S.mode !== 'online' || !S.room) return;
-    var w = 64, h = 44;
-    var x = state.W - 16 - w, y = L.actions.y + (L.actions.h - h) / 2;
-    pill(ctx, x, y, w, h, '发言', true, hits, 'chatOpen', 'gold');
+    if (S.phase !== 'play' && S.phase !== 'tribute') return;
+    var w = 72, h = 36;
+    var x = state.W - 16 - w, y = L.H - 50;
+    pill(ctx, x, y, w, h, '发言', true, hits, 'chatOpen', S.chatOpen ? 'blue' : 'gold');
   }
 
   return { header, drawnFan, seatPlate, seats, center, dealTable, hand, actions, chatEntry };

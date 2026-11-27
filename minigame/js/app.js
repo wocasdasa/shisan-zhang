@@ -48,6 +48,8 @@
     myName: '',
     chats: [],
     chatOpen: false,
+    chatTab: 'emoji',
+    chatT0: 0,
     // 辅助与面板
     auto: false,          // 托管
     autoPending: false,
@@ -103,7 +105,8 @@
       (S.fx.seatPlay && now - S.fx.seatPlay.t0 < 470) ||
       (S.fx.identityT0 && now - S.fx.identityT0 < 1000) ||
       (S.fx.settleT0 && now - S.fx.settleT0 < 1020) ||
-      (S.fx.loneRevealT0 && now - S.fx.loneRevealT0 < 1700)) P.markDirty();
+      (S.fx.loneRevealT0 && now - S.fx.loneRevealT0 < 1700) ||
+      (S.chatOpen && S.chatT0 && now - S.chatT0 < 220)) P.markDirty();
   }
 
   // ---------- 计时 ----------
@@ -394,6 +397,9 @@
     res.scores.forEach(function (v, i) { S.scores[i] += v; });
     S.phase = 'settle';
     S.deal = null;
+    S.chatOpen = false;
+    S.chatTab = 'emoji';
+    S.chatT0 = 0;
     S.fx.settleT0 = Date.now();
     // 战绩：只统计「我」这一侧；连胜在结算页显示
     var st = recordResult(res.scores[0]);
@@ -779,6 +785,9 @@
     S.selected = [];
     S.auto = false;
     S.autoPending = false;
+    S.chatOpen = false;
+    S.chatTab = 'emoji';
+    S.chatT0 = 0;
     S.testMenu = false;
     S.testDeck = false;
     P.markDirty();
@@ -977,6 +986,11 @@
       S.deal = null;
       S.phase = v.phase;
     }
+    if (S.phase !== 'play' && S.phase !== 'tribute') {
+      S.chatOpen = false;
+      S.chatTab = 'emoji';
+      S.chatT0 = 0;
+    }
 
     var plays = S.game ? S.game.trickPlays.length : 0;
     if (plays > (S.prevPlays || 0)) {
@@ -1112,6 +1126,9 @@
     S.round = 0;
     S.lastResult = null;
     S.summary = false;
+    S.chatOpen = false;
+    S.chatTab = 'emoji';
+    S.chatT0 = 0;
     S.phase = 'idle';
     S.game = null;
     S.resetPending = 0;
@@ -1570,6 +1587,9 @@
     if (S.round >= S.rounds) {
       S.summary = true;
       S.phase = 'idle';
+      S.chatOpen = false;
+      S.chatTab = 'emoji';
+      S.chatT0 = 0;
       clearTurnTimer();
       P.markDirty();
       return;
@@ -1631,7 +1651,7 @@
     drag.seen = {};
   }
 
-  // 弹层打开时吞掉下层点击（引导/战绩/复盘/抽屉/发言都是模态）
+  // 弹层打开时吞掉下层点击；发言是右侧非模态浮层，不在这里拦截
   function modalBlocked(act) {
     if (S.ask) return !(act === 'askYes' || act === 'askNo');
     if (S.guideOpen) return !/^guide/.test(act);
@@ -1646,7 +1666,6 @@
         act === 'record' || act === 'stats' || act === 'replay' || act === 'guide' || act === 'share' ||
         act === 'music' || act === 'vib' || act === 'skin');
     }
-    if (S.chatOpen) return !(act === 'chatClose' || act === 'chatEmoji' || act === 'chatText' || act === 'chatType');
     return false;
   }
 
@@ -1663,6 +1682,7 @@
       var h = hits[i];
       if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
         if (modalBlocked(h.act)) return;
+        if (h.act === 'chatPanel') return; // 点面板空白只挡住下面的牌，不发提示音
         if (h.act === 'card') {
           var c0 = handCardAt(h.i);
           if (c0 && S.tribute && S.tribute.stage === 'return') { toggleReturnSelect(c0); return; }
@@ -1740,8 +1760,16 @@
     if (h.act === 'netLeave') { returnHome(); return; }
     if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
-    if (h.act === 'chatOpen') { S.chatOpen = true; P.markDirty(); return; }
-    if (h.act === 'chatClose') { S.chatOpen = false; P.markDirty(); return; }
+    if (h.act === 'chatOpen') {
+      S.chatOpen = !S.chatOpen;
+      S.chatT0 = S.chatOpen ? Date.now() : 0;
+      if (S.chatOpen && !S.chatTab) S.chatTab = 'emoji';
+      P.markDirty();
+      return;
+    }
+    if (h.act === 'chatClose') { S.chatOpen = false; S.chatT0 = 0; P.markDirty(); return; }
+    if (h.act === 'chatTabEmoji') { S.chatTab = 'emoji'; P.markDirty(); return; }
+    if (h.act === 'chatTabPhrase') { S.chatTab = 'phrase'; P.markDirty(); return; }
     if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
     if (h.act === 'chatText') { sendChat('text', h.text); return; }
     if (h.act === 'chatType') { typeChat(); return; }

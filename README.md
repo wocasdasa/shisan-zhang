@@ -117,7 +117,7 @@ node -e "const h=require('http'),f=require('fs'),p=require('path');h.createServe
 | `?demo=lobby` / `?demo=cfg` / `?demo=keypad` | 大厅、配置面板、数字键盘 |
 | `?demo=online` | 伪造一桌联机视图（含发言、身份徽标） |
 | `?demo=online&wait=1` | 冻结在等待开局，核对房间面板（改名 / 发言） |
-| `?demo=online&chat=1[&bubble=1]` | 摊开发言面板；加 `bubble=1` 改成只看桌上气泡 |
+| `?demo=online&chat=1[&bubble=1]` | 打开右侧发言浮层；加 `bubble=1` 改成只看桌上气泡 |
 | `?demo=online&tools=1` / `pause=1` / `stats=1` / `record=1` / `replay=1` / `guide=1` | 直接摊开工具抽屉 / 对局菜单 / 战绩 / 记牌器 / 复盘 / 新手引导 |
 | `?demo=online&settle=1` | 冻结在结算页（带假战绩，核对分享、复盘、连胜光效） |
 | `?demo=<任意>&skin=0\|1\|2` | 预览三套牌背皮肤 |
@@ -245,7 +245,7 @@ node tools/wss-smoke.js wss://127.0.0.1 --insecure   # 自签证书才需要 --i
 | 背景音乐 | 更多 →「背景音乐」 | `audio.js` 程序合成 D 宫五声循环（无音频文件），首次点击后启动；开关存 `gx13_music` |
 | 牌背皮肤 | 更多 →「牌背皮肤」 | 经典红 / 青竹 / 鎏金三套（`drawBack` 取 `SKINS`），存 `gx13_skin` |
 | 连胜光效 | 结算页 | 连胜 ≥3 且本局得分为正时，面板外描一圈呼吸金光 |
-| 快捷语音 | 发言面板 | 16 表情 + 8 短语 + 「✎ 打字发言」（≤16 字，微信 `wx.showKeyboard` / 浏览器 prompt）；自己发的话**本地即时回显**，不用等服务端回包；别人发言时一声轻「叮」（`SFX.play('chat')`） |
+| 快捷语音 | 发言面板 | 16 表情 + 8 短语 + 「✎ 打字发言」（≤16 字，微信 `wx.showKeyboard` / 浏览器 prompt）；自己发的话**本地即时回显**，不用等服务端回包；别人发言时一声轻「叮」（`SFX.play('chat')`）；联机面板从右侧滑入、只占右栏，不压手牌/操作条，打开后可继续选牌出牌 |
 | 断线重连 | 自动 | 掉线后 1.5 秒一次、最多 8 次，成功后带 `key` 发 `rejoin`；期间操作条上方显示「正在重连 n/8」 |
 
 ---
