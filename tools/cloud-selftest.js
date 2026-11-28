@@ -30,7 +30,7 @@ const dbApi = {
           const id = String(cond._id)
           const rec = store[name][id]
           if (!rec) return { stats: { updated: 0 } }
-          if ('lockAt' in cond && ((rec.lockAt === undefined ? 0 : rec.lockAt) !== cond.lockAt)) {
+          if ('lockAt' in cond && rec.lockAt !== cond.lockAt) {
             return { stats: { updated: 0 } }
           }
           Object.assign(rec, arg.data)

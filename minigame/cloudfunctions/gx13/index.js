@@ -36,8 +36,11 @@ async function saveRoom(room) {
   const body = { data: { data: payload, updatedAt: room.updatedAt } }
   const res = await db.collection(COL).doc(String(room.id)).update(body).catch(() => null)
   const n = (res && res.stats && res.stats.updated) || (res && res.updated) || 0
-  // 文档还不存在时 update 影响 0 行，改用 set 建库
-  if (!n) await db.collection(COL).doc(String(room.id)).set(body)
+  // 文档还不存在时 update 影响 0 行，改用 set 建库。
+  // 新建文档必须显式带 lockAt:0，否则 acquireRoomLock 的 `lockAt:0` 条件永远匹配不到。
+  if (!n) await db.collection(COL).doc(String(room.id)).set({
+    data: Object.assign({}, body.data, { lockAt: 0 })
+  })
 }
 
 // ---------- 工具 ----------
@@ -102,7 +105,9 @@ function viewFor(room, viewer) {
     firstTurn: !!room.firstTurn,
     host: room.hostSeat === viewer,
     canStart: room.phase === 'wait' && room.hostSeat === viewer && humanCount(room) >= 1,
-    lastEvent: room.lastEvent || ''
+    lastEvent: room.lastEvent || '',
+    // 发言只回传座位相对号和内容，客户端看不到 openid / 密钥
+    chat: (room.chats || []).slice(-30).map((c) => ({ rel: rel(c.seat), kind: c.kind, text: c.text, ts: c.ts }))
   }
   if (room.summary) view.summary = { scores: [0, 1, 2, 3].map((r) => room.scores[(viewer + r) % 4]) }
   if (room.tributeShow) {
@@ -192,7 +197,7 @@ async function withRoomLock(id, fn) {
   const got = await acquireRoomLock(id)
   if (!got) {
     const exists = await loadRoom(id)
-    if (!exists) return { t: 'err', msg: '房间不存在或已解散' }
+    if (!exists) return { t: 'err', code: 'roomMissing', msg: '房间不存在或已解散' }
     return { t: 'busy', msg: '房间正忙，请稍后重试' }
   }
   try { return await fn() } finally { await releaseRoomLock(id, got) }
@@ -245,7 +250,8 @@ function newRoomObj(id, rounds, cfgIn) {
     tributeShow: null,
     summary: false,
     deadline: 0,
-    lastEvent: ''
+    lastEvent: '',
+    chats: []
   }
 }
 
@@ -635,54 +641,144 @@ function tick(room) {
   }
 }
 
+// 只在确实需要推进时加锁/写库：人类正常出牌期间，800ms 一次的 state 不应该每次都抢锁写 updatedAt
+function needsTick(room) {
+  if (!room) return false
+  if (room.phase === 'deal') return Date.now() >= (room.deadline || 0)
+  if (room.phase === 'tribute') {
+    const T = room.tributeShow
+    if (!T) return true
+    if (T.stage === 'done') return Date.now() >= (T.deadline || 0)
+    return !!(T.deadline && Date.now() >= T.deadline)
+  }
+  if (room.phase === 'play') {
+    const g = room.game
+    if (!g || g.over) return false
+    const seat = g.turn
+    if (room.seats[seat] && room.seats[seat].ai) return true
+    return !!(room.deadline && Date.now() >= room.deadline)
+  }
+  return false
+}
+
 // ---------- 入口 ----------
 function seatOf(room, openid) {
   return room.seats.findIndex((s) => s && s.openid === openid)
 }
 
+function cleanName(name) {
+  return String(name || '玩家').replace(/\s+/g, ' ').trim().slice(0, 6) || '玩家'
+}
+
+function cleanChat(kind, text) {
+  const k = kind === 'emoji' ? 'emoji' : 'text'
+  let t = String(text || '').replace(/[\r\n\t]+/g, ' ').trim()
+  t = k === 'emoji' ? t.slice(0, 4) : t.slice(0, 16)
+  return { kind: k, text: t }
+}
+
+async function makeRoomId() {
+  for (let i = 0; i < 30; i++) {
+    const cand = String(Math.floor(1000 + Math.random() * 9000))
+    const ex = await loadRoom(cand)
+    if (!ex) return cand
+  }
+  return ''
+}
+
+function joinedResult(room, seat, extra) {
+  return Object.assign({
+    t: 'joined',
+    room: room.id,
+    seat,
+    // 云函数按 openid 认人；这个 key 只是让客户端沿用原来的 rejoin 凭据结构
+    key: 'cloud',
+    state: viewFor(room, seat)
+  }, extra || {})
+}
+
 async function handle(event, openid, name) {
   const action = event.action || 'state'
 
+  if (action === 'quick') {
+    const id = await makeRoomId()
+    if (!id) return { t: 'err', code: 'createFailed', msg: '建房失败，稍后再试' }
+    const room = newRoomObj(id, event.rounds || 8, event.cfg)
+    room.seats[0] = { name: cleanName(name), openid, ai: false, ready: true }
+    room.lastEvent = '快速开局'
+    startRoom(room)
+    tick(room)
+    await saveRoom(room)
+    return joinedResult(room, 0)
+  }
+
   if (action === 'create') {
-    let id = ''
-    for (let i = 0; i < 30; i++) {
-      const cand = String(Math.floor(1000 + Math.random() * 9000))
-      const ex = await loadRoom(cand)
-      if (!ex) { id = cand; break }
-    }
-    if (!id) return { t: 'err', msg: '建房失败，稍后再试' }
+    const id = await makeRoomId()
+    if (!id) return { t: 'err', code: 'createFailed', msg: '建房失败，稍后再试' }
     const room = newRoomObj(id, event.rounds, event.cfg)
-    room.seats[0] = { name: String(name || '玩家').slice(0, 6), openid, ai: false, ready: false }
+    room.seats[0] = { name: cleanName(name), openid, ai: false, ready: false }
     room.lastEvent = room.seats[0].name + ' 创建房间'
     tick(room)
     await saveRoom(room)
-    const out = viewFor(room, 0)
-    out.t = 'state'
-    return { t: 'joined', room: id, seat: 0, state: out }
+    return joinedResult(room, 0)
   }
 
   if (action === 'join') {
     const room = await loadRoom(event.room)
-    if (!room) return { t: 'err', msg: '房间不存在' }
-    if (room.phase !== 'wait') return { t: 'err', msg: '这局已经开始了' }
+    if (!room) return { t: 'err', code: 'roomMissing', msg: '房间不存在' }
+    if (room.phase !== 'wait') return { t: 'err', code: 'phaseStarted', msg: '这局已经开始了' }
     let seat = seatOf(room, openid)
     if (seat < 0) seat = room.seats.findIndex((s) => !s)
-    if (seat < 0) return { t: 'err', msg: '房间满了' }
-    room.seats[seat] = { name: String(name || '玩家').slice(0, 6), openid, ai: false, ready: false }
+    if (seat < 0) return { t: 'err', code: 'roomFull', msg: '房间满了' }
+    room.seats[seat] = { name: cleanName(name), openid, ai: false, ready: false }
     room.lastEvent = room.seats[seat].name + ' 加入房间'
     await saveRoom(room)
-    return { t: 'joined', room: room.id, seat, state: viewFor(room, seat) }
+    return joinedResult(room, seat)
+  }
+
+  // 断线/切后台回来：云开发按 openid 认人，不需要旧的 WebSocket 密钥
+  if (action === 'rejoin') {
+    return await withRoomLock(event.room, async () => {
+      const room = await loadRoom(event.room)
+      if (!room) return { t: 'err', code: 'roomMissing', msg: '房间不存在或已解散' }
+      const seat = seatOf(room, openid)
+      if (seat < 0) return { t: 'err', code: 'notInRoom', msg: '你不在这个房间' }
+      tick(room)
+      await saveRoom(room)
+      return joinedResult(room, seat, { rejoin: true })
+    })
   }
 
   return await withRoomLock(event.room, async () => {
   const room = await loadRoom(event.room)
-  if (!room) return { t: 'err', msg: '房间不存在或已解散' }
+  if (!room) return { t: 'err', code: 'roomMissing', msg: '房间不存在或已解散' }
   const seat = seatOf(room, openid)
-  if (seat < 0) return { t: 'err', msg: '你不在这个房间' }
+  if (seat < 0) return { t: 'err', code: 'notInRoom', msg: '你不在这个房间' }
 
   tick(room)
 
-  if (action === 'ready') {
+  if (action === 'chat') {
+    const c = cleanChat(event.kind, event.text)
+    if (c.text) {
+      room.chats = room.chats || []
+      room.chats.push({ seat, kind: c.kind, text: c.text, ts: Date.now() })
+      if (room.chats.length > 40) room.chats = room.chats.slice(-40)
+    }
+    await saveRoom(room)
+    return viewFor(room, seat)
+  } else if (action === 'rename') {
+    if (room.seats[seat] && !room.seats[seat].ai) room.seats[seat].name = cleanName(event.name)
+    room.lastEvent = playerName(room, seat) + ' 改名'
+    await saveRoom(room)
+    return viewFor(room, seat)
+  } else if (action === 'dissolve') {
+    if (room.hostSeat !== seat) {
+      await saveRoom(room)
+      return { t: 'err', code: 'notHost', msg: '只有房主能解散房间', state: viewFor(room, seat) }
+    }
+    try { await db.collection(COL).doc(String(room.id)).remove() } catch (e) {}
+    return { t: 'roomClosed', room: room.id, msg: '房间已解散' }
+  } else if (action === 'ready') {
     if (room.phase === 'wait' && room.seats[seat]) room.seats[seat].ready = event.v !== false
   } else if (action === 'start') {
     if (room.hostSeat !== seat) { await saveRoom(room); return { t: 'err', msg: '只有房主能开始', state: viewFor(room, seat) } }
@@ -774,11 +870,21 @@ async function handle(event, openid, name) {
       tick(room)
     }
   } else if (action === 'leave') {
-    room.seats[seat] = null
-    room.lastEvent = '有人离开房间'
-    if (room.phase === 'wait' && humanCount(room) === 0) {
+    const wasHost = room.hostSeat === seat
+    room.lastEvent = playerName(room, seat) + ' 离开房间'
+    if (room.phase === 'wait') {
+      room.seats[seat] = null
+    } else {
+      // 对局中离开：座位交给托管 AI，别让整桌卡在空座位上
+      room.seats[seat] = { name: '托管' + (seat + 1), ai: true, ready: true }
+    }
+    if (wasHost) {
+      const nextHost = room.seats.findIndex((s, i) => i !== seat && s && !s.ai)
+      if (nextHost >= 0) room.hostSeat = nextHost
+    }
+    if (humanCount(room) === 0) {
       try { await db.collection(COL).doc(String(room.id)).remove() } catch (e) {}
-      return { t: 'left' }
+      return { t: 'left', room: room.id }
     }
   }
 
@@ -796,13 +902,20 @@ exports.main = async (event) => {
   if (action === 'ping') return { t: 'pong', time: Date.now(), env: process.env.TCB_ENV || '' }
 
   if (action === 'state') {
+    // 先无锁读一次：人类正常思考/选牌时不需要推进，直接返回，避免每 800ms 都抢锁写库
+    const peek = await loadRoom(event.room)
+    if (!peek) return { t: 'err', code: 'roomMissing', msg: '房间不存在或已解散' }
+    const peekSeat = seatOf(peek, openid)
+    if (peekSeat < 0) return { t: 'err', code: 'notInRoom', msg: '你不在这个房间' }
+    if (!needsTick(peek)) return viewFor(peek, peekSeat)
+
     const lock = await acquireRoomLock(event.room)
     try {
       const room = await loadRoom(event.room)
-      if (!room) return { t: 'err', msg: '房间不存在或已解散' }
+      if (!room) return { t: 'err', code: 'roomMissing', msg: '房间不存在或已解散' }
       const seat = seatOf(room, openid)
-      if (seat < 0) return { t: 'err', msg: '你不在这个房间' }
-      if (lock) {
+      if (seat < 0) return { t: 'err', code: 'notInRoom', msg: '你不在这个房间' }
+      if (lock && needsTick(room)) {
         tick(room)
         await saveRoom(room)
       }

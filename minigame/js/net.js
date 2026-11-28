@@ -4,22 +4,28 @@
 (function () {
   var isWx = (typeof wx !== 'undefined') && (typeof wx.connectSocket === 'function');
   var hasCloud = (typeof wx !== 'undefined') && wx.cloud && (typeof wx.cloud.callFunction === 'function');
-  // 云开发分支当前只有链路桩（没有房间逻辑）：默认关闭，避免小游戏里 create/join 永远收不到回包
-  // 要真用云开发，先 wx.setStorageSync('gx13_cloud', '1') 并把云函数补齐
-  var cloudOn = false;
-  try {
-    cloudOn = !!hasCloud && String(wx.getStorageSync('gx13_cloud') || '') === '1';
-  } catch (e) { cloudOn = false; }
 
-  // 构建期默认地址（minigame/js/config.js）；留空表示不覆盖
+  // 构建期配置（minigame/js/config.js）
   var CFG = {};
   try {
     if (typeof module === 'object' && module.exports && require) CFG = require('./config.js') || {};
   } catch (e) { CFG = {}; }
 
+  // 微信端默认走云开发；浏览器没有 wx.cloud，自动走 WebSocket。
+  // 调试自建服务端时，执行 wx.setStorageSync('gx13_cloud','0') 可切回 WebSocket。
+  var cloudOn = false;
+  try {
+    if (hasCloud && CFG.CLOUD_ON !== false) {
+      var savedCloud = String(wx.getStorageSync('gx13_cloud') || '');
+      cloudOn = savedCloud !== '0';
+      if (savedCloud === '1') cloudOn = true;
+    }
+  } catch (e) { cloudOn = false; }
+
   // 云开发环境（开通云开发后控制台可见；也可用 wx.setStorageSync('gx13_env', 'xxx') 覆盖）
+  // 留空时用当前小游戏的默认云环境，少一处需要手填的配置。
   var ENV_KEY = 'gx13_env';
-  var DEFAULT_ENV = (typeof GX_CLOUD_ENV !== 'undefined' && GX_CLOUD_ENV) || 'cloud1-d7g8xcknn7afb1637';
+  var DEFAULT_ENV = (CFG && CFG.CLOUD_ENV) || (typeof GX_CLOUD_ENV !== 'undefined' && GX_CLOUD_ENV) || '';
   var CLOUD_ENV = DEFAULT_ENV;
   try {
     if (hasCloud) {
@@ -48,10 +54,11 @@
   var pollTimer = null;
   var lastStateJson = '';
   var inFlight = false;
+  var cloudFails = 0;
   var POLL_MS = 800;
 
   function defaultUrl() {
-    if (cloudOn) return '云开发 ' + CLOUD_ENV;
+    if (cloudOn) return '云开发 ' + (CLOUD_ENV || '当前环境');
     if (isWx) {
       try {
         var saved = wx.getStorageSync('gx13_server');
@@ -101,7 +108,8 @@
       open = true;
       closedNotified = false;
       lastMsgAt = Date.now();
-      startHeartbeat();
+      // 云开发用轮询保活，不能复用 WebSocket 的心跳，否则 60 秒没入站消息会误判断线
+      if (!cloudMode) startHeartbeat();
       if (handlers.open) handlers.open();
       while (queue.length) send(queue.shift());
       return;
@@ -119,7 +127,8 @@
   function cloudInit() {
     if (!hasCloud) return false;
     try {
-      wx.cloud.init({ env: CLOUD_ENV, traceUser: false });
+      if (CLOUD_ENV) wx.cloud.init({ env: CLOUD_ENV, traceUser: false });
+      else wx.cloud.init({ traceUser: false });
       return true;
     } catch (e) {
       try { wx.cloud.init(); return true; } catch (e2) { return false; }
@@ -142,18 +151,43 @@
     if (handlers.message) handlers.message(state);
   }
 
+  function pollOnce() {
+    if (!cloudRoom || inFlight) return;
+    inFlight = true;
+    cloudCall('state').then(function (res) {
+      inFlight = false;
+      if (!res) return;
+      if (res.t === 'err') {
+        // 房间被解散/座位被清掉：这不是网络断线，直接把玩家送回大厅
+        if (res.code === 'roomMissing' || res.code === 'notInRoom') {
+          cloudRoom = '';
+          stopPolling();
+          try { wx.removeStorageSync('gx13_room'); } catch (e) {}
+          if (handlers.message) handlers.message({ t: 'roomClosed', msg: res.msg || '房间已解散' });
+          return;
+        }
+        if (handlers.message) handlers.message(res);
+        return;
+      }
+      if (res.t === 'busy') return;
+      cloudFails = 0;
+      dispatchState(res);
+    }).catch(function () {
+      inFlight = false;
+      cloudFails++;
+      // 偶发一次云函数超时不值得把整桌踢掉；连续 3 次（约 2.4 秒）才交给上层重连
+      if (cloudFails >= 3) {
+        cloudFails = 0;
+        fire('error', { msg: '云开发连接失败，请检查网络后重试' });
+        close();
+      }
+    });
+  }
+
   function startPolling() {
     if (pollTimer) return;
-    pollTimer = setInterval(function () {
-      if (!cloudRoom || inFlight) return;
-      inFlight = true;
-      cloudCall('state').then(function (res) {
-        inFlight = false;
-        if (!res) return;
-        if (res.t === 'err') { fire('close'); return; }
-        dispatchState(res);
-      }).catch(function () { inFlight = false; });
-    }, POLL_MS);
+    pollOnce();
+    pollTimer = setInterval(pollOnce, POLL_MS);
   }
 
   function stopPolling() {
@@ -162,40 +196,90 @@
 
   function cloudConnect() {
     cloudMode = true;
-    if (!cloudInit()) { fire('error', { msg: '云开发初始化失败' }); return; }
+    cloudFails = 0;
+    lastStateJson = '';
+    stopHeartbeat();
+    if (!cloudInit()) {
+      queue.length = 0;
+      fire('error', { msg: '云开发初始化失败：请先在开发者工具开通云开发，并上传 gx13 云函数' });
+      return;
+    }
     // 延后一个 tick 抛 open，让上层先把 pending 消息准备好
     setTimeout(function () { fire('open'); }, 0);
+  }
+
+  function handleCloudJoined(res, rejoin) {
+    if (!res || res.t !== 'joined') return false;
+    cloudRoom = res.room;
+    cloudFails = 0;
+    try { wx.setStorageSync('gx13_room', res.room); } catch (e) {}
+    if (handlers.message) {
+      handlers.message({ t: 'joined', room: res.room, seat: res.seat, key: res.key || 'cloud', rejoin: !!rejoin });
+    }
+    lastStateJson = '';
+    if (res.state) dispatchState(res.state);
+    startPolling();
+    return true;
+  }
+
+  function handleCloudErr(res) {
+    if (!res) return;
+    if (res.t === 'err') {
+      if (res.code === 'roomMissing' || res.code === 'notInRoom') {
+        cloudRoom = '';
+        stopPolling();
+        try { wx.removeStorageSync('gx13_room'); } catch (e) {}
+        if (handlers.message) handlers.message({ t: 'roomClosed', msg: res.msg || '房间已解散' });
+        return;
+      }
+      if (handlers.message) handlers.message(res);
+      if (res.state) dispatchState(res.state);
+      return;
+    }
+    if (res.t === 'roomClosed') {
+      cloudRoom = '';
+      stopPolling();
+      try { wx.removeStorageSync('gx13_room'); } catch (e) {}
+      if (handlers.message) handlers.message(res);
+      return;
+    }
+    if (res.t === 'busy') {
+      if (handlers.message) handlers.message({ t: 'err', msg: res.msg || '房间正忙，请稍后再试' });
+    }
   }
 
   function cloudSend(obj) {
     if (!obj || !obj.t) return;
     var t = obj.t;
-    if (t === 'ping' || t === 'ready') return;
-    if (t === 'create' || t === 'join') {
-      var act = t;
+    if (t === 'ping') return;
+
+    // 建房 / 加入 / 快速开局 / 重连：都需要把云函数返回的 joined 交给上层
+    if (t === 'create' || t === 'join' || t === 'quick' || t === 'rejoin') {
       var extra = { name: obj.name || '玩家' };
-      if (t === 'create') extra.rounds = obj.rounds;
-      else extra.room = obj.room;
-      cloudCall(act, extra).then(function (res) {
+      if (t === 'create' || t === 'quick') {
+        extra.rounds = obj.rounds;
+        extra.cfg = obj.cfg;
+      } else {
+        extra.room = obj.room || cloudRoom;
+      }
+      cloudCall(t, extra).then(function (res) {
         if (!res) return;
-        if (res.t === 'err') { if (handlers.message) handlers.message(res); return; }
-        if (res.t === 'joined') {
-          cloudRoom = res.room;
-          try { wx.setStorageSync('gx13_room', res.room); } catch (e) {}
-          if (handlers.message) handlers.message({ t: 'joined', room: res.room });
-          lastStateJson = '';
-          if (res.state) dispatchState(res.state);
-          startPolling();
-        }
-      }).catch(function (e) { fire('error', e); });
+        if (res.t === 'joined') { handleCloudJoined(res, t === 'rejoin'); return; }
+        handleCloudErr(res);
+      }).catch(function () {
+        if (handlers.message) handlers.message({ t: 'err', msg: '云开发调用失败，请确认 gx13 云函数已上传' });
+      });
       return;
     }
+
     if (t === 'leave') {
       cloudCall('leave').catch(function () {});
       cloudRoom = '';
       stopPolling();
+      try { wx.removeStorageSync('gx13_room'); } catch (e) {}
       return;
     }
+
     if (!cloudRoom) {
       try {
         var savedRoom = wx.getStorageSync('gx13_room');
@@ -203,16 +287,26 @@
       } catch (e) {}
       if (!cloudRoom) return;
     }
-    var payload = { cards: obj.cards, v: obj.v, seatRel: obj.seatRel };
+
+    var payload = {
+      cards: obj.cards,
+      v: obj.v,
+      seatRel: obj.seatRel,
+      kind: obj.kind,
+      text: obj.text,
+      name: obj.name,
+      cfg: obj.cfg,
+      room: obj.room,
+      key: obj.key
+    };
     cloudCall(t, payload).then(function (res) {
       if (!res) return;
-      if (res.t === 'err') {
-        if (handlers.message) handlers.message(res);
-        if (res.state) dispatchState(res.state);
-        return;
-      }
-      if (res.t === 'state') { dispatchState(res); startPolling(); }
-    }).catch(function (e) { fire('error', e); });
+      if (res.t === 'joined') { handleCloudJoined(res, t === 'rejoin'); return; }
+      if (res.t === 'state') { dispatchState(res); startPolling(); return; }
+      handleCloudErr(res);
+    }).catch(function () {
+      if (handlers.message) handlers.message({ t: 'err', msg: '云开发调用失败，请确认 gx13 云函数已上传' });
+    });
   }
 
   // ---------- WebSocket ----------

@@ -29,7 +29,7 @@ const fakeDb = {
     where: (q) => ({
       update: async (body) => {
         const cur = store.get(String(q._id));
-        if (!cur || (cur.lockAt || 0) !== q.lockAt) return { stats: { updated: 0 } };
+        if (!cur || cur.lockAt !== q.lockAt) return { stats: { updated: 0 } };
         store.set(String(q._id), Object.assign({}, cur, clone(body.data)));
         return { stats: { updated: 1 } };
       }

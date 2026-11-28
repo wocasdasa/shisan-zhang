@@ -10,6 +10,20 @@
 - 账号/房间逻辑全部走服务端；牌桌上不再出现场次/对手/进贡/重开等单机遗留 chip，调试「测试」入口也不再出现在联机牌桌
 - 局内「主界面」和总结页「回到开始界面」现在回主菜单，不再回联机大厅；本地引擎只保留给无头测试和预览 demo
 
+**联机迁移到微信云开发**
+- 正式联机从「自建 WebSocket + 公网服务器 / 备案域名」切到微信云开发：不需要服务器、备案、证书或 `wss://`，手机/异地直接可连
+- 云函数 `gx13` 补齐正式对局：`quick`（建房+补 3 机器人+发牌一次完成）、`create/join/rejoin`、`ready/start/play/pass`、进贡全流程、`chat/rename/dissolve`、离开托管、房主转移、空房删除
+- 客户端 `net.js` 微信端默认云开发（`wx.cloud.callFunction` + 800ms `state` 轮询）；浏览器预览仍走 WebSocket，互不影响
+- 云开发模式不再跑 WebSocket 心跳，避免 60 秒无入站消息误判断线；`roomClosed/roomMissing` 直接回大厅，不无限重连
+- 发言/改名/解散全部走云函数；`dissolve` 仅房主可执行，其他人收到 `roomClosed`
+- `minigame/js/config.js` 默认 `CLOUD_ON: true`、`CLOUD_ENV: 'cloud1-d7g8xcknn7afb1637'`
+- 云函数已部署到真实环境 `cloud1-d7g8xcknn7afb1637`（14 文件 / 29.5 KB）；本地回归 `cloud-selftest`、`cloud-feature-test`（21 项）、`smoke-cloud-tribute`、`test-lock`、`test-tribute-quick` 全部通过
+- 修复新房间没有 `lockAt` 导致云数据库锁永远抢不到的问题；`state` 轮询只在确实需要推进（发牌结束/AI 回合/超时）时加锁写库，正常人类思考期间不再每 800ms 写一次
+
+**文档**
+- 新增 [`deploy/cloud-dev.md`](deploy/cloud-dev.md)：云开发开通、上传 `gx13`、`gx13_rooms` 私有权限、超时调整、真机双账号验收、故障排查
+- `README.md` / `minigame/README.md` 的「云函数桩」「AppID touristappid」「真机必须 wss」等过期说明已更新
+
 **牌桌发言**
 - 「发言」入口固定到屏幕右下角、手牌下方，不再挤在提示/不出/出牌操作条里
 - 发言面板从居中大弹窗改成从右侧滑入的常驻浮层：只占右侧，不压手牌和操作条；打开后仍可直接选牌、出牌，不需要先关面板

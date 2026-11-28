@@ -6,8 +6,9 @@
 
 1. 打开「微信开发者工具」→ 新建/导入项目 → 目录选本文件夹 `minigame`
 2. 项目类型必须选 **小游戏**（不是小程序）
-3. AppID 填自己的小游戏 AppID；`project.config.json` 里现在是占位值 `touristappid`，正式预览/真机必须替换
-4. 编译即可玩；手机横屏（开发者工具里切「横屏」看效果）
+3. AppID 已配置为 `wx31c52de4c0526c31`；如果换主体，改 `project.config.json` 里的 `appid`
+4. 确认云开发环境已开通（当前 `cloud1-d7g8xcknn7afb1637`），并已上传云函数 `gx13`；步骤见 [`../deploy/cloud-dev.md`](../deploy/cloud-dev.md)
+5. 编译即可玩；手机横屏（开发者工具里切「横屏」看效果）
 
 不想装工具的话，同目录的 `preview.html` 双击就能在浏览器里玩（同一套代码，只是换了平台适配层；窗口横过来就是横屏布局，竖着也还能看）。
 
@@ -16,14 +17,14 @@
 ```
 minigame/
 ├── game.js            入口：require('./js/app.js').boot()
-├── game.json          竖屏、无状态栏
+├── game.json          横屏、无状态栏
 ├── project.config.json  compileType: "game"，appid 需替换
 ├── preview.html       浏览器预览版（构建产物，勿手改）
 └── js/
     ├── platform.js    平台适配：设计宽 750，微信 wx.* / 浏览器 canvas 双实现，脏标记重绘
     ├── views.js       纯 Canvas 绘制 + 点击热区（draw 返回 hits 数组）
     ├── audio.js       音效：WebAudio 合成，不依赖音频文件
-    ├── net.js         联机传输层：微信 wx.connectSocket / 浏览器 WebSocket 双实现
+    ├── net.js         联机传输层：微信默认 wx.cloud.callFunction，浏览器仍用 WebSocket
     ├── app.js         状态机、触屏、20 秒计时、进贡、结算、联机视图映射
     └── engine/        规则引擎（12 个模块，与 engine/ 同源）
 ```
@@ -49,23 +50,38 @@ minigame/
 - 每步 20 秒，超时按"跳过"处理：桌上有牌就自动过牌；只有轮到你起手（桌面无牌、必须出牌）时才替出最小合法牌
 - 房间规则（局数 8/12/16/24/32、重贡/轻贡、每步限时、队友提示）由房主在创建房间时设置；联机牌桌不再出现单机的场次/对手/进贡切换 chip
 
-## 联机（自建 WebSocket 服务端）
+## 联机（微信云开发，默认）
 
-服务端在 `E:\AAproject\guangxi_13\server\`，无第三方依赖，回合校验、进贡、计分全在服务端，客户端只负责画和点。
+**不需要公网服务器、域名、备案、证书。** 微信端默认走云开发；浏览器 `preview.html` 仍走 WebSocket，只用于本地调试。
 
-1. 起服务：`node server/index.js`（默认 `ws://0.0.0.0:8787`，`PORT` 环境变量可改）
-2. 客户端连法：浏览器预览默认连 `ws://当前host:8787`，可加 `?server=ws://192.168.1.5:8787`；微信侧用 `wx.setStorageSync('gx13_server','ws://…')` 指定地址
-3. 进厅：主界面只有「开始游戏」，点后进联机大厅。要单人打三家机器人就点「快速开局」（1 真人 + 3 机器人，直接发牌）；要和真人玩就创建房间（拿 4 位房号）或输入房号加入
-4. 房主准备齐全点「开始（空位补机器人）」；不足 4 人由机器人补位，人齐了就 4 个真人
-5. 微信开发者工具里联机需勾「不校验合法域名」；真机必须把 `ws://` 换成已备案的 `wss://` 域名，否则连不上
+- 云函数：`cloudfunctions/gx13/`，已包含房间、发牌、出牌、过牌、结算、进贡、AI 推进、超时、发言、改名、解散、重连。
+- 云数据库：`gx13_rooms`，只由云函数读写；客户端不直接读集合，手牌由 `viewFor` 裁剪后返回。
+- 环境配置：`js/config.js` 的 `CLOUD_ENV`；当前为 `cloud1-d7g8xcknn7afb1637`。
+- 传输开关：`CLOUD_ON: true`；本地若要回 WebSocket，执行 `wx.setStorageSync('gx13_cloud', '0')`，并清掉本地缓存里的旧值。
+- 轮询：客户端每 800ms 调 `state`；连续 3 次失败才重连，收到 `roomClosed` 回大厅。
 
-协议（JSON，客户端 → 服务端）：`quick / create / join / ready / start / play / pass / draw / return / next / ping`；服务端回 `hello / joined / state / err / roomClosed / pong`，`state` 是按你的座位旋转过的完整视图（只带你自己的手牌）。`quick` 会在服务端一次完成建房、补 3 个机器人、发牌，不需要再发 `start`。房主解散时自己回主界面，其他玩家收到 `roomClosed` 后回大厅。
+### 好友房流程
+
+1. 主界面只有「开始游戏」，点后进联机大厅。
+2. 单人打三家机器人：点「快速开局」（1 真人 + 3 机器人，直接发牌）。
+3. 和真人玩：创建房间拿 4 位房号，或输入房号加入；房主点「开始（空位补机器人）」。
+4. 房主解散：自己回大厅，其他人收到 `roomClosed` 后回大厅。
+
+### 云开发协议
+
+客户端 → 云函数：`quick / create / join / rejoin / ready / start / play / pass / drawPick / pullPick / retOne / return / next / leave / dissolve / rename / chat / state / ping`。
+
+云函数 → 客户端：`joined / state / err / roomClosed / pong`。`state` 是按你的座位旋转过的完整视图（只带你自己的手牌和公共发言）。
+
+### 部署
+
+见 [`../deploy/cloud-dev.md`](../deploy/cloud-dev.md)。最少三步：上传 `gx13` 云函数、建 `gx13_rooms` 集合并设私有权限、重新编译。
 
 进贡超时也自动处理：该抽不抽的，20 秒后服务端代抽并代还，不会卡局。
 
 ## 已知没做的
 
-- 长断线（>90 秒）被机器人接管后不能夺回座位；90 秒内带 `key` 可重连回原座位
+- 长断线（>90 秒）被机器人接管后不能夺回座位；云开发用 `rejoin` 按 openid 回原座位，不依赖 WebSocket `key`
 - 上架材料：企业主体、软件著作权、游戏版号、备案（牌类小游戏缺一不可，个人主体无法选该品类）
 - 独食三种变体（叫独食 / 暗独食 / 摆牌独食）规则未查清，未做
 

@@ -671,14 +671,17 @@
         var pj = S.pending; S.pending = null; NET.send(pj);
       }
       if (S.lobby) S.lobby.err = '';
-      if (!S.reconnecting) toast('已连接服务器');
+      if (!S.reconnecting) toast(NET.isCloud ? '已连接云开发' : '已连接服务器');
       P.markDirty();
     });
     NET.on('error', function (e) {
       S.netStatus = '连接失败';
+      var msg = (e && e.msg) ? e.msg : (NET.isCloud ? '云开发连接失败，请确认云函数已上传' : ('连不上服务器：' + NET.defaultUrl()));
       if (S.lobby) {
         S.lobby.busy = false;
-        S.lobby.err = '连接失败：' + (NET.defaultUrl() || '');
+        S.lobby.err = msg;
+      } else {
+        toast(msg);
       }
       P.markDirty();
     });
@@ -691,14 +694,6 @@
       if (S.leaving) { P.markDirty(); return; }   // 主动退房/回大厅：不要弹“连接断开”盖住操作提示
       if (S.lobby) { S.lobby.busy = false; S.lobby.err = '连接断开，请重试'; }
       toast('连接断开');
-      P.markDirty();
-    });
-    NET.on('error', function () {
-      S.netStatus = '连接失败';
-      if (S.lobby) {
-        S.lobby.busy = false;
-        S.lobby.err = '连不上服务器：' + NET.defaultUrl();
-      }
       P.markDirty();
     });
     NET.on('message', onNetMessage);
@@ -1706,6 +1701,7 @@
     if (h.act === 'netQuickCancel') { S.leaving = true; returnHome(); return; }
     if (h.act === 'netCreate') { netCreate(); return; }
     if (h.act === 'netConfig') {
+      if (NET.isCloud) { toast('当前走微信云开发，不需要服务器地址'); return; }
       S.lobby = { kind: 'config', url: NET.defaultUrl(), err: '', code: '' };
       P.markDirty();
       return;
@@ -1722,6 +1718,7 @@
     if (h.act === 'netCfgConfirm') { netCreate(); return; }
     if (h.act === 'netKeypad') { S.lobby = { kind: 'keypad', code: '', err: '' }; P.markDirty(); return; }
     if (h.act === 'netServer') {
+      if (NET.isCloud) { toast('当前走微信云开发，不需要服务器地址'); return; }
       var wasQuick = S.lobby && S.lobby.kind === 'quick';
       P.askText('联机服务器地址（ws:// 或 wss://）', NET.defaultUrl(), 80, function (v) {
         var s = String(v || '').trim();

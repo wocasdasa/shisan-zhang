@@ -1,6 +1,6 @@
 # 广西十三张 · 独食
 
-「十三张独食（横县找朋友 / 找朋友）」的可玩实现：**一套规则引擎 + 三个运行端**——微信小游戏、浏览器预览页、自建 WebSocket 联机服务端。
+「十三张独食（横县找朋友 / 找朋友）」的可玩实现：**一套规则引擎 + 微信小游戏 + 浏览器预览 + 联机后端**。现在正式联机走**微信云开发**，自建 WebSocket 只保留为备用/本地调试。
 纯 Canvas 绘制（无 DOM、无第三方框架），音频全部程序合成，只有出牌播报用 25 个人声小片段。
 
 - 玩法：4 人一桌，♠3 / ♠A 持有者组队；同一人拿两张 = **独食 1 打 3**
@@ -17,14 +17,14 @@
                  ┌────────────────────┐
                  │  engine/  规则引擎  │  纯函数、无平台依赖，Node 与小游戏都能跑
                  └─────────┬──────────┘
-        ┌──────────────────┼───────────────────┐
-        │                  │                   │
-  minigame/js/engine   server/index.js     test/、tools/smoke-*
-  （小游戏内副本）      （联机权威端）      （自战/回归脚本）
-        │
+        ┌──────────────────┼───────────────────┬──────────────────┐
+        │                  │                   │                  │
+  minigame/js/engine   cloudfunctions/gx13  server/index.js     test/、tools/smoke-*
+  （小游戏内副本）      （云开发权威端，默认） （自建 WS 权威端，备用） （自战/回归脚本）
+        │                  │
   minigame/js/{app,views,audio,net,platform}.js
-        ├── 微信小游戏（wx.* 适配）
-        └── preview.html（浏览器适配，构建产物）
+        ├── 微信小游戏（wx.* 适配，默认 wx.cloud.callFunction）
+        └── preview.html（浏览器适配，本地 WebSocket）
 ```
 
 **关键约定：规则只有一份源码 `engine/`。** 小游戏打包无法引用工程外文件，所以 `minigame/js/engine/` 是它的副本：
@@ -33,9 +33,9 @@
 | 层 | 位置 | 职责 |
 |---|---|---|
 | 规则引擎 | `engine/` 12 个模块 | 牌值/花色、牌型识别、合法出牌、身份与阵营、AI、结算、进贡；纯函数，无 I/O |
-| 客户端（小游戏 + 浏览器） | `minigame/js/` | 状态机、点击热区、动效、音效与语音、联机传输、平台适配 |
-| 联机服务端 | `server/` | 无依赖 ws 服务，房间、发牌、回合校验、进贡、计分全部在服务端；客户端只负责画和点 |
-| 云函数 | `cloudfunctions/gx13/` | 仅链路自检桩（返回 openid/env），**没有房间逻辑**；实际联机走 WebSocket，微信云开发暂未启用 |
+| 客户端（小游戏 + 浏览器） | `minigame/js/` | 状态机、点击热区、动效、音效与语音、联机传输（微信云开发 / 浏览器 WebSocket）、平台适配 |
+| 微信云函数（默认联机） | `minigame/cloudfunctions/gx13/` | 房间、发牌、回合校验、进贡、计分、AI 推进、超时、发言、改名、解散、rejoin；线上真机走这里 |
+| 自建 WebSocket（备用） | `server/` | 无依赖 ws 服务，同一套权威逻辑；仅在本地调试或显式关闭云开发时使用 |
 | 早期产物 | `ui/`、`dist/` | 网页原型稿与打包 zip，仅存档，不参与小游戏运行 |
 
 ---
@@ -69,19 +69,19 @@ guangxi_13/
 │       ├── views/base.js   常量和 state（W/lastH/SKIN）+ 绘制原语 + 全部特效
 │       ├── views/table.js  页头、座位、中央出牌区、手牌、操作条
 │       ├── views/panels.js 进贡、结算、菜单、大厅、房间、聊天、工具抽屉、战绩、复盘、引导
-│       ├── config.js       构建期默认服务器地址（上线填 wss://）
+│       ├── config.js       联机模式：CLOUD_ON / CLOUD_ENV / SERVER_URL
 │       ├── audio.js        音效合成 + 语音播报队列
-│       ├── net.js          传输层（wx.connectSocket / 浏览器 WebSocket）+ 心跳 + 重连
+│       ├── net.js          传输层：微信默认 wx.cloud.callFunction，浏览器 WebSocket；心跳/轮询/重连
 │       ├── platform.js     平台适配（设计宽 750、脏标记重绘、文字输入）
 │       └── engine/         规则引擎副本（由 tools/sync-engine.js 同步）
+├── minigame/cloudfunctions/gx13/  微信云函数（默认联机权威端）
 ├── server/
-│   ├── index.js            房间与对局权威端（默认 ws://0.0.0.0:8787，配证书即 wss://）
+│   ├── index.js            自建 WebSocket 权威端（默认 ws://0.0.0.0:8787，配证书即 wss://）
 │   └── ws.js               极简 WebSocket 实现（无第三方依赖，可选 TLS）
-├── deploy/                 上线手册：systemd 单元、nginx 样例、环境变量
+├── deploy/                 上线手册：云开发步骤、systemd 单元、nginx 样例、环境变量
 ├── tools/                  开发脚本（见第 4 节）
 ├── test/                   自战与一致性校验
 ├── docs/                   规则书、设计文档、验证报告
-├── cloudfunctions/gx13/    微信云函数桩
 ├── ui/                     早期网页原型（存档）
 └── dist/                   打包 zip 输出目录
 ```
@@ -125,22 +125,32 @@ node -e "const h=require('http'),f=require('fs'),p=require('path');h.createServe
 | `?room=1000&server=ws://127.0.0.1:8787` | 直接进指定房间 |
 | `?name=昵称` | 首次进房用的昵称 |
 
-### 3.2 微信开发者工具
+### 3.2 微信开发者工具（正式联机）
 
 1. 开发者工具 → 导入项目 → 目录选 `minigame/`，项目类型必须 **小游戏**（不是小程序）
 2. AppID 已填 `wx31c52de4c0526c31`（本项目的小游戏 AppID）
-3. 编译即可；`project.config.json` 里 `urlCheck: false` 已关掉域名校验，方便连本地 `ws://`
-4. 真机联机必须把 `ws://` 换成已备案的 **`wss://`** 域名（`wx.setStorageSync('gx13_server','wss://…')` 或 `?server=`）
+3. 云开发环境 `cloud1-d7g8xcknn7afb1637`；先上传云函数 `gx13`（[`deploy/cloud-dev.md`](deploy/cloud-dev.md) 第 2 节）
+4. 编译；大厅顶部显示「云开发 …」即可。真机不需要域名、备案或 `wss://`
 
-### 3.3 联机服务端
+### 3.3 微信云开发联机（默认，线上）
+
+- 配置：`minigame/js/config.js` → `CLOUD_ON: true`、`CLOUD_ENV`、`SERVER_URL: ''`
+- 调用：`wx.cloud.callFunction({ name: 'gx13' })`；`quick/create/join/rejoin/ready/start/play/pass/.../state` 全部走它
+- 房间：云数据库 `gx13_rooms`；客户端不直接读，云函数按座位裁剪后返回
+- 轮询：800ms；快速开局一次完成建房、补 3 个机器人、发牌
+- 退出：最后一人离开/房主解散删除房间；`rejoin` 按 openid 找回座位
+- **完整部署、数据库权限、真机验收、故障排查见 [`deploy/cloud-dev.md`](deploy/cloud-dev.md)**
+
+### 3.4 自建 WebSocket（备用/本地预览）
 
 ```powershell
 node server/index.js            # 默认 8787，PORT/HOST 环境变量可改
 ```
 
-- 客户端默认连 `ws://<当前host>:8787`，可 `?server=ws://192.168.1.5:8787` 覆盖；真机在联机大厅点「服务器」一行改地址
-- 主界面只有「开始游戏」→ 联机大厅。**快速开局**发 `{t:'quick'}`，服务端一次完成建房、补 3 个机器人、发牌；**创建/加入房间**用于好友局，房主点「开始（空位补机器人）」，最多 4 真人
-- 快速验证联机：`node tools/smoke-quick.js`（快速人机协议）、`node tools/wss-smoke.js ws://127.0.0.1:8787`（握手→建房→发言），或 `hostbot.js` / `netbot.js` 模拟客户端
+- 浏览器 `preview.html` 仍走 `ws://<当前host>:8787`，可 `?server=ws://192.168.1.5:8787` 覆盖
+- 微信端默认不走这里；本地要回 WebSocket 执行 `wx.setStorageSync('gx13_cloud','0')`，并重启小游戏
+- 真机若坚持走自建：必须备案域名 + 受信任证书 + 微信后台 socket 合法域名（443），见 [`deploy/README.md`](deploy/README.md)
+- 快速验证：`node tools/smoke-quick.js`、`node tools/wss-smoke.js ws://127.0.0.1:8787`
 
 **直接跑 wss**（不装 nginx，适合内网/联调）：
 
@@ -166,6 +176,11 @@ node tools/wss-smoke.js wss://127.0.0.1 --insecure   # 自签证书才需要 --i
 | `node tools/shot-matrix.js .tools/vis-a` | **改完 `views/` 必跑**：采集 24 个 demo 模式的画布像素哈希 + 热区，冻结时间/随机数保证可复现 |
 | `node tools/shot-matrix.js --compare .tools/vis-a .tools/vis-b` | 两套截图矩阵逐模式比对（`WIN=1334,750` 跑横屏，游戏真实朝向） |
 | `node tools/wss-smoke.js ws://127.0.0.1:8787` | 联机冒烟：握手 → 建房 → 发言往返；`wss://` 与 `--insecure` 支持自签 |
+| `node tools/cloud-selftest.js` | **云函数本地回归**：建房、发牌、完整一局、结算、第二局进贡 |
+| `node tools/cloud-feature-test.js` | 云函数 21 项协议回归：quick/chat/rename/dissolve/rejoin/离开托管/删房/锁初始化 |
+| `node tools/smoke-cloud-tribute.js` | 云函数进贡三场景回归 |
+| `node tools/test-lock.js` | 云函数 20 并发锁测试 |
+| `node tools/test-tribute-quick.js` | 云函数进贡快速流程（手牌恒 13 张） |
 | `node test/selftest.js` | 引擎自检（牌型、比较、计分） |
 | `node test/selfplay.js` | 全 AI 自战若干局，检查规则不崩 |
 | `node tools/smoke-quick.js` | 快速人机协议：一条 `quick` 完成建房 + 3 机器人 + 发牌（需先起服务端） |
@@ -270,7 +285,7 @@ node tools/wss-smoke.js wss://127.0.0.1 --insecure   # 自签证书才需要 --i
 6. **改完 `views/` 必须做像素回归**：`node tools/shot-matrix.js .tools/vis-a` 采基线 → 改 → 再采 → `--compare`。它冻结 `Date.now`/`Math.random`，比的是画布像素哈希 + 完整 `hits` 数组；横屏要加 `$env:WIN='1334,750'`（游戏是横屏）。
 7. 语音/音效：`audio.js` 合成音不依赖文件；语音必须走队列，**不要**在播放中间 `stop()`，否则会截断上一手。
 8. 头像/昵称：昵称存在本地 `gx13_myname`，进房时随 `create/join` 上报，房内改名走 `rename`。
-9. 联机地址：构建期看 `minigame/js/config.js` 的 `SERVER_URL`，运行期看存储 `gx13_server`（游戏内大厅可改），**存储优先**。
+9. 联机模式：`minigame/js/config.js` 的 `CLOUD_ON`/`CLOUD_ENV`（微信默认云开发）；只有显式 `wx.setStorageSync('gx13_cloud','0')` 才回退到 `SERVER_URL` / `gx13_server` 的 WebSocket。
 10. 截图、日志、试听 wav、二维码等产出**不要提交**（见 `.gitignore`），放本地 `tools/` 或临时目录即可。
 11. 微信侧打开文档/链接一律走飞书/Lark 工具，不要用浏览器打开 `larkoffice` 链接（工具约定）。
 
@@ -297,11 +312,12 @@ node tools/pack-dist.js
 
 ## 10. 已知限制 / 待办
 
-- 联机只在**自建 WebSocket** 上可用；微信云开发链路（`net.js` 的 `hasCloud` 分支）没有实现房间逻辑，**默认关闭**（要真用得先 `wx.setStorageSync('gx13_cloud','1')` 并把云函数补齐），别误开
-- **代码侧 wss 已就绪**（服务端可选 TLS、客户端 25s 心跳、游戏内可改地址、部署手册齐备），但还没有备案域名与证书：默认地址仍是 `ws://127.0.0.1:8787`，大厅会用红字提示真机不可用。上线只差 [`deploy/README.md`](deploy/README.md) 里那几步
-- 真机必须 `wss://` 且域名已在小游戏后台配置（socket 合法域名，不能带端口）
+- **正式联机已走微信云开发**：环境 `cloud1-d7g8xcknn7afb1637`，云函数 `gx13` 已部署；客户端默认云开发，不需要服务器/备案/wss。云函数 3 秒超时还没在控制台调高（建议 10 秒），见 [`deploy/cloud-dev.md`](deploy/cloud-dev.md)
+- 自建 WebSocket 仍保留为备用/本地预览：仓库里有部署手册，但线上不再依赖它；真机如果强行回退，必须备案 `wss://` 域名
+- 云开发 `gx13_rooms` 权限必须是私有；客户端不能直接读集合，否则会泄漏手牌
+- **真实微信云端到端对局仍待手机验收**：本机已完成本地协议回归、云函数本地回归和真实部署，但还没用两台手机跑完建房→发牌→出牌→结算
 - AI 三档难度只影响候选筛选激进程度，不是搜索型 AI
-- 断线重连只覆盖自建 WebSocket；云开发分支没实现房间逻辑，也就没有 rejoin
+- 断线重连：云开发用 `rejoin` 按 openid 找回座位；自建 WebSocket 用 `key`，两套不要混用
 - 战绩 / 排行 / 复盘都只存在本机（`gx13_stats`、`gx13_skin` 等），换设备不迁移；暂不上云、无全服榜
 - 待做：观战、分享图卡（现在是分享文案 + 标题，没有生成战绩海报）
 - 待做：`app.js`（80KB）仍是单文件状态机，本轮只拆了 `views.js`；下一轮可按 `state / actions / online` 再拆

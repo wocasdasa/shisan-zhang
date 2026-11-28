@@ -20,7 +20,7 @@ const fakeDb = {
         const id = String(cond._id)
         const rec = store[name][id]
         if (!rec) return { stats: { updated: 0 } }
-        if ('lockAt' in cond && ((rec.lockAt === undefined ? 0 : rec.lockAt) !== cond.lockAt)) {
+        if ('lockAt' in cond && rec.lockAt !== cond.lockAt) {
           return { stats: { updated: 0 } }
         }
         Object.assign(rec, arg.data)
@@ -78,10 +78,11 @@ async function main() {
   while (v.phase === 'tribute' && v.tribute && v.tribute.stage === 'pull' && guard++ < 40) {
     const rows = v.tribute.pull.rows
     log('摊开：' + rows.map((r) => 'rel' + r.rel + '=' + r.n + '张').join(' ') + ' 进度 ' + v.tribute.pull.done + '/' + v.tribute.pull.total)
-    const row = rows.filter((r) => r.n > 0)[0]
+    const quota = v.tribute.pairQuota
+    const row = rows.filter((r) => r.n > 0 && (!quota || (v.tribute.pulledFrom[r.rel] || 0) < quota))[0] ||
+      rows.filter((r) => r.n > 0)[0]
     if (!row) break
     if (v.tribute.pull.total === 0) { log('total 为 0，跳过'); break }
-    if (!row) break
     await fn.main({ action: 'pullPick', room, seatRel: row.rel, idx: Math.floor(Math.random() * 10) })
     v = await fn.main({ action: 'state', room })
   }
