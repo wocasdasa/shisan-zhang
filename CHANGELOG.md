@@ -17,8 +17,17 @@
 - 云开发模式不再跑 WebSocket 心跳，避免 60 秒无入站消息误判断线；`roomClosed/roomMissing` 直接回大厅，不无限重连
 - 发言/改名/解散全部走云函数；`dissolve` 仅房主可执行，其他人收到 `roomClosed`
 - `minigame/js/config.js` 默认 `CLOUD_ON: true`、`CLOUD_ENV: 'cloud1-d7g8xcknn7afb1637'`
-- 云函数已部署到真实环境 `cloud1-d7g8xcknn7afb1637`（14 文件 / 29.5 KB）；本地回归 `cloud-selftest`、`cloud-feature-test`（21 项）、`smoke-cloud-tribute`、`test-lock`、`test-tribute-quick` 全部通过
+- 云函数已部署到真实环境 `cloud1-d7g8xcknn7afb1637`（14 文件 / 29.9 KB）；本地回归 `cloud-selftest`、`cloud-feature-test`（27 项）、`smoke-cloud-tribute`、`test-lock`、`test-tribute-quick` 全部通过
 - 修复新房间没有 `lockAt` 导致云数据库锁永远抢不到的问题；`state` 轮询只在确实需要推进（发牌结束/AI 回合/超时）时加锁写库，正常人类思考期间不再每 800ms 写一次
+
+**好友房：邀请 / 踢人 / 房内道具**
+- 等待房顶部新增「复制房号」「邀请好友」：分享文案带 `room=4位房号`，朋友点分享卡片自动进等待房；复制房号走微信剪贴板
+- 微信冷启动/切回前台读取 `query.room`，已在其他房间时不误切；浏览器预览仍支持 `?room=` 链接
+- 房主在等待阶段可移除在线真人玩家（二次确认）；对局中不允许踢人，空位不会被误踢
+- 发言面板新增「道具」页签：先选相对座位 1..3，再点砸蛋 / 西红柿 / 送花；只广播聊天事件，客户端播放飞行动画
+- **道具不设冷却、无库存、无商城**；服务端只保留最近 30 条房内事件，避免数据库无限增长
+- 分享战绩自动生成图卡（离屏 canvas 失败时退回微信默认分享图）；分享文案/图卡带房号时可在结算页继续邀请
+- 云函数新增 `kick` 动作和 `chat.kind:'prop'` 协议；本地 `cloud-feature-test` 扩到 27 项、`NET-CLOUD-PASS` 全部通过
 
 **文档**
 - 新增 [`deploy/cloud-dev.md`](deploy/cloud-dev.md)：云开发开通、上传 `gx13`、`gx13_rooms` 私有权限、超时调整、真机双账号验收、故障排查

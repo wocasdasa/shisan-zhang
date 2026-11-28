@@ -107,7 +107,14 @@ function viewFor(room, viewer) {
     canStart: room.phase === 'wait' && room.hostSeat === viewer && humanCount(room) >= 1,
     lastEvent: room.lastEvent || '',
     // 发言只回传座位相对号和内容，客户端看不到 openid / 密钥
-    chat: (room.chats || []).slice(-30).map((c) => ({ rel: rel(c.seat), kind: c.kind, text: c.text, ts: c.ts }))
+    chat: (room.chats || []).slice(-30).map((c) => {
+      const item = { rel: rel(c.seat), kind: c.kind, text: c.text, ts: c.ts }
+      if (c.kind === 'prop') {
+        item.prop = c.prop
+        item.target = rel(c.target)
+      }
+      return item
+    })
   }
   if (room.summary) view.summary = { scores: [0, 1, 2, 3].map((r) => room.scores[(viewer + r) % 4]) }
   if (room.tributeShow) {
@@ -677,6 +684,16 @@ function cleanChat(kind, text) {
   return { kind: k, text: t }
 }
 
+const PROP_KINDS = ['egg', 'tomato', 'flower']
+function cleanProp(room, seat, prop, targetRel) {
+  if (PROP_KINDS.indexOf(String(prop || '')) < 0) return null
+  const rel = Number(targetRel)
+  if (!Number.isInteger(rel) || rel < 1 || rel > 3) return null
+  const target = (seat + rel + 4) % 4
+  if (!room.seats[target]) return null
+  return { prop: String(prop), target }
+}
+
 async function makeRoomId() {
   for (let i = 0; i < 30; i++) {
     const cand = String(Math.floor(1000 + Math.random() * 9000))
@@ -758,17 +775,52 @@ async function handle(event, openid, name) {
   tick(room)
 
   if (action === 'chat') {
-    const c = cleanChat(event.kind, event.text)
-    if (c.text) {
+    if (event.kind === 'prop') {
+      const p = cleanProp(room, seat, event.prop, event.target)
+      if (!p) {
+        await saveRoom(room)
+        return { t: 'err', code: 'badProp', msg: '道具或目标不合法', state: viewFor(room, seat) }
+      }
       room.chats = room.chats || []
-      room.chats.push({ seat, kind: c.kind, text: c.text, ts: Date.now() })
-      if (room.chats.length > 40) room.chats = room.chats.slice(-40)
+      room.chats.push({ seat, kind: 'prop', prop: p.prop, target: p.target, ts: Date.now() })
+      room.lastEvent = playerName(room, seat) + ' 对 ' + playerName(room, p.target) + ' 用了道具'
+      if (room.chats.length > 30) room.chats = room.chats.slice(-30)
+    } else {
+      const c = cleanChat(event.kind, event.text)
+      if (c.text) {
+        room.chats = room.chats || []
+        room.chats.push({ seat, kind: c.kind, text: c.text, ts: Date.now() })
+        if (room.chats.length > 30) room.chats = room.chats.slice(-30)
+      }
     }
     await saveRoom(room)
     return viewFor(room, seat)
   } else if (action === 'rename') {
     if (room.seats[seat] && !room.seats[seat].ai) room.seats[seat].name = cleanName(event.name)
     room.lastEvent = playerName(room, seat) + ' 改名'
+    await saveRoom(room)
+    return viewFor(room, seat)
+  } else if (action === 'kick') {
+    if (room.hostSeat !== seat) {
+      await saveRoom(room)
+      return { t: 'err', code: 'notHost', msg: '只有房主能移除玩家', state: viewFor(room, seat) }
+    }
+    if (room.phase !== 'wait') {
+      await saveRoom(room)
+      return { t: 'err', code: 'phaseStarted', msg: '开局后不能移出座位', state: viewFor(room, seat) }
+    }
+    const rel = Number(event.seat)
+    if (!Number.isInteger(rel) || rel < 1 || rel > 3) {
+      await saveRoom(room)
+      return { t: 'err', code: 'badSeat', msg: '座位不合法', state: viewFor(room, seat) }
+    }
+    const target = (seat + rel + 4) % 4
+    if (!room.seats[target] || room.seats[target].openid === openid) {
+      await saveRoom(room)
+      return { t: 'err', code: 'badSeat', msg: '这个座位不能移除', state: viewFor(room, seat) }
+    }
+    room.lastEvent = playerName(room, seat) + ' 移除了 ' + playerName(room, target)
+    room.seats[target] = null
     await saveRoom(room)
     return viewFor(room, seat)
   } else if (action === 'dissolve') {

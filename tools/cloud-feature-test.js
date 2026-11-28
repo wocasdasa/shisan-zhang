@@ -85,10 +85,16 @@ async function main() {
   ok(quick.state.phase === 'deal' || quick.state.phase === 'play', 'quick phase', quick.state.phase)
   const quickRoom = quick.room
   ok(store.gx13_rooms[quickRoom] && store.gx13_rooms[quickRoom].lockAt === 0, 'quick lockAt initialized')
+  const prop = await as('openid_A', { action: 'chat', room: quickRoom, kind: 'prop', prop: 'egg', target: 1 })
+  ok(prop.t === 'state' && prop.chat.some((c) => c.kind === 'prop' && c.prop === 'egg' && c.target === 1), 'prop egg stored', JSON.stringify(prop.chat))
+  const badProp = await as('openid_A', { action: 'chat', room: quickRoom, kind: 'prop', prop: 'bomb', target: 1 })
+  ok(badProp.t === 'err' && badProp.code === 'badProp', 'bad prop rejected', JSON.stringify(badProp))
+  const kickInGame = await as('openid_A', { action: 'kick', room: quickRoom, seat: 1 })
+  ok(kickInGame.t === 'err' && kickInGame.code === 'phaseStarted', 'kick rejected after start', JSON.stringify(kickInGame))
 
   // 2. 发言与改名
   const chat = await as('openid_A', { action: 'chat', room: quickRoom, kind: 'text', text: '快点吧' })
-  ok(chat.t === 'state' && chat.chat && chat.chat.length === 1, 'chat stored', JSON.stringify(chat.chat))
+  ok(chat.t === 'state' && chat.chat && chat.chat.some((c) => c.kind === 'text' && c.text === '快点吧'), 'chat stored', JSON.stringify(chat.chat))
   const renamed = await as('openid_A', { action: 'rename', room: quickRoom, name: '新阿明' })
   ok(renamed.seats[0].name === '新阿明', 'rename applied')
 
@@ -113,6 +119,14 @@ async function main() {
 
   const badDissolve = await as('openid_B', { action: 'dissolve', room })
   ok(badDissolve.t === 'err' && badDissolve.code === 'notHost', 'non-host dissolve rejected', JSON.stringify(badDissolve))
+
+  const badKick = await as('openid_B', { action: 'kick', room, seat: 1 })
+  ok(badKick.t === 'err' && badKick.code === 'notHost', 'non-host kick rejected', JSON.stringify(badKick))
+  const kicked = await as('openid_A', { action: 'kick', room, seat: 1 })
+  ok(kicked.t === 'state' && kicked.seats[1].online === false, 'host kick clears seat', JSON.stringify(kicked.seats[1]))
+  const kickedState = await as('openid_B', { action: 'state', room })
+  ok(kickedState.t === 'err' && kickedState.code === 'notInRoom', 'kicked player sees notInRoom', JSON.stringify(kickedState))
+
   const dissolved = await as('openid_A', { action: 'dissolve', room })
   ok(dissolved.t === 'roomClosed', 'host dissolve', JSON.stringify(dissolved))
   const afterDissolve = await as('openid_A', { action: 'state', room })

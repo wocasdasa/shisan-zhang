@@ -65,11 +65,15 @@ minigame/
 1. 主界面只有「开始游戏」，点后进联机大厅。
 2. 单人打三家机器人：点「快速开局」（1 真人 + 3 机器人，直接发牌）。
 3. 和真人玩：创建房间拿 4 位房号，或输入房号加入；房主点「开始（空位补机器人）」。
-4. 房主解散：自己回大厅，其他人收到 `roomClosed` 后回大厅。
+4. 等待房点「复制房号」或「邀请好友」：分享卡片带 `room=房号`，朋友点开自动进房；房主可移除未开局的真人玩家。
+5. 房内可发「砸蛋 / 西红柿 / 送花」，目标为相对座位 1..3，不设冷却、无库存；只广播聊天事件和播放飞行动画。
+6. 房主解散：自己回大厅，其他人收到 `roomClosed` 后回大厅。
 
 ### 云开发协议
 
-客户端 → 云函数：`quick / create / join / rejoin / ready / start / play / pass / drawPick / pullPick / retOne / return / next / leave / dissolve / rename / chat / state / ping`。
+客户端 → 云函数：`quick / create / join / rejoin / ready / start / play / pass / drawPick / pullPick / retOne / return / next / leave / dissolve / rename / chat / kick / state / ping`。
+
+道具使用 `chat` 的 `kind:'prop'`，字段 `prop: egg|tomato|flower`、`target: 1..3`（相对座位）；房主踢人用 `kick`，字段 `seat: 1..3`（相对座位），仅等待阶段。
 
 云函数 → 客户端：`joined / state / err / roomClosed / pong`。`state` 是按你的座位旋转过的完整视图（只带你自己的手牌和公共发言）。
 

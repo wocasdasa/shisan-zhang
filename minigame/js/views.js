@@ -55,6 +55,8 @@
       if (!S.lobby) menu(ctx, S, L, hits);
       if (S.lobby) lobbyPanel(ctx, S, L, hits);
       if (S.waitRoom) roomPanel(ctx, S, L, hits);
+      if (S.waitRoom) fxOverlay(ctx, S, L, H);
+      if (S.chatOpen && S.waitRoom) chatPanel(ctx, S, L, hits);
       if (S.guideOpen) guidePanel(ctx, S, L, hits);
       if (S.ask) askPanel(ctx, S, L, hits);
       if (S.toast) toast(ctx, S, L);
@@ -85,7 +87,8 @@
     if (S.summary) summary(ctx, S, L, hits);
     if (S.lobby) lobbyPanel(ctx, S, L, hits);
     if (S.waitRoom) roomPanel(ctx, S, L, hits);
-    if (S.chatOpen && (S.phase === 'play' || S.phase === 'tribute')) chatPanel(ctx, S, L, hits);
+    if (S.waitRoom) fxOverlay(ctx, S, L, H);
+    if (S.chatOpen && (S.phase === 'play' || S.phase === 'tribute' || S.phase === 'wait')) chatPanel(ctx, S, L, hits);
     if (S.toolsOpen) toolsDrawer(ctx, S, L, hits);
     if (S.pauseOpen) pausePanel(ctx, S, L, hits);
     if (S.statsOpen) statsPanel(ctx, S, L, hits);

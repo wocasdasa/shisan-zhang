@@ -50,6 +50,8 @@
     chatOpen: false,
     chatTab: 'emoji',
     chatT0: 0,
+    chatTarget: 1,
+    propFx: null,      // {from,target,prop,t0}
     // 辅助与面板
     auto: false,          // 托管
     autoPending: false,
@@ -106,6 +108,7 @@
       (S.fx.identityT0 && now - S.fx.identityT0 < 1000) ||
       (S.fx.settleT0 && now - S.fx.settleT0 < 1020) ||
       (S.fx.loneRevealT0 && now - S.fx.loneRevealT0 < 1700) ||
+      (S.propFx && now - S.propFx.t0 < 900) ||
       (S.chatOpen && S.chatT0 && now - S.chatT0 < 220)) P.markDirty();
   }
 
@@ -474,6 +477,34 @@
   // 预置表情/短语：画布内不调输入法，点一下即发
   var CHAT_EMOJI = ['😀', '😄', '😎', '🤔', '😭', '😡', '👍', '👏', '🎉', '🃏', '🙏', '🤝', '💤', '🔥', '🍀', '👀'];
   var CHAT_PHRASES = ['快点吧', '出牌真快', '承让了', '别催我', '我再想想', '再来一局', '这牌没法打', '稳住别浪'];
+  var CHAT_PROPS = { egg: '🥚', tomato: '🍅', flower: '💐' };
+
+  function propName(prop) {
+    return { egg: '蛋', tomato: '西红柿', flower: '花' }[prop] || '道具';
+  }
+
+  function playPropFx(from, target, prop) {
+    S.propFx = { from: from, target: target, prop: prop, t0: Date.now() };
+    if (target === 0 && S.vibOn) {
+      try { if (typeof wx !== 'undefined' && wx.vibrateShort) wx.vibrateShort({ type: 'light' }); } catch (e) {}
+    }
+    P.markDirty();
+  }
+
+  function sendProp(prop, target) {
+    if (S.mode !== 'online' || !S.room) { toast('联机房间里才能用道具'); return; }
+    target = parseInt(target, 10) || 0;
+    if (target < 1 || target > 3) { toast('先选一个目标'); return; }
+    NET.send({ t: 'chat', kind: 'prop', prop: prop, target: target });
+    S.chats = (S.chats || []).concat([{
+      rel: 0, kind: 'prop', prop: prop, target: target,
+      text: propName(prop), ts: Date.now(), pending: true
+    }]);
+    if (S.chats.length > 12) S.chats = S.chats.slice(-12);
+    playPropFx(0, target, prop);
+    if (S.chatOpen) SFX.play('chat');
+    P.markDirty();
+  }
 
   // ---------- 本地存档（战绩 / 引导 / 震动 / 皮肤） ----------
   function storageGet(key, def) {
@@ -573,21 +604,172 @@
       (st.streak > 1 ? '，' + st.streak + ' 连胜' : '') + '，来一局？';
   }
 
-  // 分享战绩：微信走原生分享，浏览器退化到复制文本
-  function shareResult() {
-    var title = shareText();
+  function track(name, data) {
     try {
-      if (typeof wx !== 'undefined' && wx.shareAppMessage) {
-        wx.shareAppMessage({ title: title, imageUrl: '' });
+      if (typeof wx !== 'undefined' && wx.reportEvent) wx.reportEvent(name, data || {});
+    } catch (e) {}
+  }
+
+  function copyText(text, okText) {
+    text = String(text || '');
+    try {
+      if (typeof wx !== 'undefined' && wx.setClipboardData) {
+        wx.setClipboardData({ data: text, success: function () { toast(okText || '已复制'); } });
         return;
       }
       if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        navigator.clipboard.writeText(title);
-        toast('战绩文案已复制，可粘贴分享');
+        navigator.clipboard.writeText(text);
+        toast(okText || '已复制');
         return;
       }
     } catch (e) {}
-    toast(title);
+    toast(text);
+  }
+
+  function copyRoom() {
+    if (!S.room) { toast('先建房或加入房间'); return; }
+    copyText(S.room, '房号 ' + S.room + ' 已复制');
+    track('share_room', { action: 'copy' });
+  }
+
+  // 生成分享图卡：离屏 canvas 失败时不阻塞分享，退回系统默认图
+  function makeShareCard(kind, cb) {
+    var done = function (url) { cb(url || ''); };
+    if (typeof wx === 'undefined' || !wx.createOffscreenCanvas) { done(''); return; }
+    try {
+      var c = wx.createOffscreenCanvas({ type: '2d', width: 600, height: 480 });
+      var x = c.getContext('2d');
+      var g = x.createLinearGradient(0, 0, 600, 480);
+      g.addColorStop(0, '#123f36');
+      g.addColorStop(1, '#061615');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 600, 480);
+      x.strokeStyle = '#d9b45c';
+      x.lineWidth = 2;
+      x.strokeRect(18, 18, 564, 444);
+      x.fillStyle = '#e9d39a';
+      x.font = 'bold 26px sans-serif';
+      x.fillText('广西十三张 · 独食', 42, 66);
+      x.fillStyle = '#8fb6a8';
+      x.font = '16px sans-serif';
+      x.fillText(kind === 'room' ? '四人熟人房 · 三缺一' : '本场战绩', 42, 96);
+
+      if (kind === 'room') {
+        x.fillStyle = '#f5e7bd';
+        x.font = 'bold 84px sans-serif';
+        x.fillText(S.room || '----', 42, 220);
+        x.fillStyle = '#8fb6a8';
+        x.font = '18px sans-serif';
+        x.fillText('房号 · 4 人 · ' + (S.rounds || 8) + ' 局', 42, 258);
+        var seats = S.seats || [];
+        for (var i = 0; i < 4; i++) {
+          var s = seats[i] || {};
+          var line = (i === 0 ? '我：' : '座位 ' + (i + 1) + '：') + (s.name || (s.ai ? '机器人' : '空位'));
+          x.fillStyle = i === 0 ? '#e9d39a' : '#cfe4db';
+          x.font = '18px sans-serif';
+          x.fillText(line, 42, 312 + i * 30);
+        }
+        x.fillStyle = '#d9b45c';
+        x.font = 'bold 20px sans-serif';
+        x.fillText('点这张卡片，直接进房间', 42, 440);
+      } else {
+        var total = S.scores[0] || 0;
+        x.fillStyle = '#f5e7bd';
+        x.font = 'bold 86px sans-serif';
+        x.fillText((total > 0 ? '+' : '') + total, 42, 218);
+        x.fillStyle = '#8fb6a8';
+        x.font = '18px sans-serif';
+        x.fillText('本场得分', 42, 254);
+        var st = S.stats || loadStats();
+        if (st.streak > 1) {
+          x.fillStyle = '#e9d39a';
+          x.font = 'bold 24px sans-serif';
+          x.fillText(st.streak + ' 连胜', 42, 300);
+        }
+        var ss = S.seats || [];
+        for (var j = 0; j < 4; j++) {
+          var q = ss[j] || {};
+          x.fillStyle = j === 0 ? '#e9d39a' : '#cfe4db';
+          x.font = '17px sans-serif';
+          x.fillText((q.name || '座位' + (j + 1)) + '  ' + (S.scores[j] || 0), 42, 342 + j * 26);
+        }
+        x.fillStyle = '#d9b45c';
+        x.font = '20px sans-serif';
+        x.fillText('来一局，看看谁先独食', 42, 440);
+      }
+
+      if (typeof c.toTempFilePath !== 'function') { done(''); return; }
+      c.toTempFilePath({
+        x: 0, y: 0, width: 600, height: 480, destWidth: 600, destHeight: 480,
+        fileType: 'png',
+        success: function (r) { done(r && r.tempFilePath); },
+        fail: function () { done(''); }
+      });
+    } catch (e) { done(''); }
+  }
+
+  function shareWithCard(title, query, kind) {
+    if (typeof wx === 'undefined' || !wx.shareAppMessage) {
+      copyText(title, '分享文案已复制');
+      return;
+    }
+    makeShareCard(kind, function (url) {
+      try {
+        wx.shareAppMessage({ title: title, query: query || '', imageUrl: url || '' });
+      } catch (e) {}
+    });
+  }
+
+  // 邀请好友：分享卡片带 room=1234，朋友点开自动进房
+  function shareRoom() {
+    if (!S.room) { toast('先建房或加入房间'); return; }
+    shareWithCard('房号 ' + S.room + '｜广西十三张·独食，三缺一', 'room=' + S.room, 'room');
+    track('share_room', { action: 'invite' });
+  }
+
+  // 分享战绩：微信走原生分享，浏览器退化到复制文本
+  function shareResult() {
+    var title = shareText();
+    shareWithCard(title, S.room ? 'room=' + S.room : '', 'result');
+    track('share_result', { room: S.room || '' });
+  }
+
+  // 分享卡片 / 小程序码 query：room=1234 时自动进入等待房
+  function roomCodeFromQuery(q) {
+    if (!q) return '';
+    var code = String(q.room || '').replace(/[^0-9]/g, '').slice(0, 4);
+    return code.length === 4 ? code : '';
+  }
+
+  function enterRoomFromQuery(q) {
+    var code = roomCodeFromQuery(q);
+    if (!code) return false;
+    if (S.room) {
+      if (S.room !== code) toast('你已在房间 ' + S.room + '，先离开再加入 ' + code);
+      return true;
+    }
+    if (S.phase !== 'menu' && S.phase !== 'lobby') return false;
+    openLobby();
+    netJoin(code);
+    track('enter_room_share', { room: code });
+    return true;
+  }
+
+  function bindWxEntry() {
+    if (typeof wx === 'undefined') return;
+    var onQuery = function (q) {
+      if (!q) return;
+      setTimeout(function () { enterRoomFromQuery(q); }, 0);
+    };
+    try {
+      if (wx.getLaunchOptionsSync) {
+        var opt = wx.getLaunchOptionsSync();
+        onQuery(opt && opt.query);
+      }
+      if (wx.onShow) {
+        wx.onShow(function (res) { onQuery(res && res.query); });
+      }
+    } catch (e) {}
   }
 
   // ---------- 托管：轮到我且长时间没操作，自动出最小合法牌 / 过牌 ----------
@@ -809,6 +991,14 @@
     P.markDirty();
   }
 
+  function netKick(rel) {
+    if (!S.room || !S.isHost || S.phase !== 'wait') return;
+    rel = parseInt(rel, 10) || 0;
+    if (rel < 1 || rel > 3) return;
+    NET.send({ t: 'kick', seat: rel });
+    toast('已移出该玩家');
+  }
+
   // 快速开局：服务端一次完成「建房 → 补 3 个机器人 → 发牌」，不经过等待房
   function netQuick() {
     S.mode = 'online';
@@ -935,12 +1125,24 @@
     });
     S.chats = (v.chat || []).map(function (c) {
       var fresh = (c.ts || 0) > seenTs;
-      return { rel: c.rel, kind: c.kind, text: c.text, ts: fresh ? Date.now() : Date.now() - 8000 };
+      var item = { rel: c.rel, kind: c.kind, text: c.text, ts: fresh ? Date.now() : Date.now() - 8000 };
+      if (c.kind === 'prop') {
+        item.prop = c.prop;
+        item.target = c.target;
+        item.text = propName(c.prop);
+      }
+      if (fresh && seenTs > 0 && c.kind === 'prop' &&
+          !pend.some(function (p) { return p.kind === 'prop' && p.prop === c.prop && p.target === c.target; })) {
+        playPropFx(c.rel, c.target, c.prop);
+      }
+      return item;
     });
     // 服务端还没回显的自己那句，先补上；已被回显的则去掉 pending，避免重复
     pend.forEach(function (p) {
       var dup = S.chats.some(function (c) {
-        return c.rel === 0 && c.kind === p.kind && c.text === p.text;
+        if (c.rel !== 0 || c.kind !== p.kind) return false;
+        if (p.kind === 'prop') return c.prop === p.prop && c.target === p.target;
+        return c.text === p.text;
       });
       if (!dup) S.chats.push(p);
     });
@@ -981,7 +1183,7 @@
       S.deal = null;
       S.phase = v.phase;
     }
-    if (S.phase !== 'play' && S.phase !== 'tribute') {
+    if (S.phase !== 'play' && S.phase !== 'tribute' && S.phase !== 'wait') {
       S.chatOpen = false;
       S.chatTab = 'emoji';
       S.chatT0 = 0;
@@ -1755,6 +1957,9 @@
     if (h.act === 'netStart') { NET.send({ t: 'start' }); return; }
     if (h.act === 'netReady') { NET.send({ t: 'ready', v: !S.myReady }); return; }
     if (h.act === 'netLeave') { returnHome(); return; }
+    if (h.act === 'netCopyRoom') { copyRoom(); return; }
+    if (h.act === 'netShareRoom') { shareRoom(); return; }
+    if (h.act === 'netKick') { S.ask = { kind: 'kick', seat: h.rel }; P.markDirty(); return; }
     if (h.act === 'dissolveWait') { S.ask = { kind: 'dissolve' }; P.markDirty(); return; }
     if (h.act === 'netRename') { askName(); return; }
     if (h.act === 'chatOpen') {
@@ -1767,8 +1972,11 @@
     if (h.act === 'chatClose') { S.chatOpen = false; S.chatT0 = 0; P.markDirty(); return; }
     if (h.act === 'chatTabEmoji') { S.chatTab = 'emoji'; P.markDirty(); return; }
     if (h.act === 'chatTabPhrase') { S.chatTab = 'phrase'; P.markDirty(); return; }
+    if (h.act === 'chatTabProp') { S.chatTab = 'prop'; P.markDirty(); return; }
+    if (h.act === 'chatTarget') { S.chatTarget = h.rel; P.markDirty(); return; }
     if (h.act === 'chatEmoji') { sendChat('emoji', h.text); return; }
     if (h.act === 'chatText') { sendChat('text', h.text); return; }
+    if (h.act === 'chatProp') { sendProp(h.prop, S.chatTarget); return; }
     if (h.act === 'chatType') { typeChat(); return; }
     if (h.act === 'card') { tapCard(h.i); return; }
     if (h.act === 'auto') {
@@ -1797,8 +2005,13 @@
     }
     if (h.act === 'askNo') { S.ask = null; P.markDirty(); return; }
     if (h.act === 'askYes') {
-      var kind = S.ask ? S.ask.kind : 'exit';
+      var ask = S.ask || {};
+      var kind = ask.kind || 'exit';
       S.ask = null;
+      if (kind === 'kick') {
+        netKick(ask.seat);
+        return;
+      }
       if (kind === 'dissolve') {
         if (S.mode === 'online') {
           S.leaving = true;       // 房主自己退房，不再等 roomClosed 回大厅
@@ -1963,6 +2176,7 @@
     S.myName = loadName();
     S.chatEmoji = CHAT_EMOJI;
     S.chatPhrases = CHAT_PHRASES;
+    S.chatProps = CHAT_PROPS;
     // 本地偏好与战绩
     S.vibOn = storageGet('gx13_vib') !== '0';
     var sk = parseInt(storageGet('gx13_skin') || '0', 10);
@@ -2005,13 +2219,18 @@
     try {
       if (typeof wx !== 'undefined' && wx.onShareAppMessage) {
         if (wx.showShareMenu) wx.showShareMenu({ withShareTicket: false });
-        wx.onShareAppMessage(function () { return { title: shareText() }; });
+        wx.onShareAppMessage(function () {
+          var out = { title: shareText() };
+          if (S.room) out.query = 'room=' + S.room;
+          return out;
+        });
       }
     } catch (e) {}
     if (P.bindMove) P.bindMove(onDrag);
     if (P.bindEnd) P.bindEnd(onDragEnd);
     P.start(draw);
     if (typeof window !== 'undefined') window.__gx = { S: S, P: P, onTap: onTap, SFX: SFX };
+    bindWxEntry();
     if (typeof window !== 'undefined' && window.location &&
         /demo=pullTest/.test(window.location.search || '')) {
       demoPullTest();
@@ -2195,6 +2414,15 @@
         { rel: 2, kind: 'emoji', text: '😭', ts: t0c - 3000 },
         { rel: 0, kind: 'text', text: '马上就好', ts: t0c - 800 }
       ];
+      if (/prop=1/.test(window.location.search || '')) {
+        S.chatTab = 'prop';
+        S.chatTarget = 2;
+        S.chats = [
+          { rel: 1, kind: 'prop', prop: 'egg', target: 2, text: '蛋', ts: t0c - 5000 },
+          { rel: 2, kind: 'prop', prop: 'tomato', target: 1, text: '西红柿', ts: t0c - 2400 },
+          { rel: 0, kind: 'prop', prop: 'flower', target: 2, text: '花', ts: t0c - 600 }
+        ];
+      }
     }
     // 预览用：&settle=1 停在结算页，核对分享/复盘按钮与连胜文案
     if (typeof window !== 'undefined' && window.location &&

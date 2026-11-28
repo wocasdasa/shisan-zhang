@@ -507,31 +507,47 @@ module.exports = function (B) {
     var px = (state.W - pw) / 2, py = (H - ph) / 2;
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
 
-    txt(ctx, '房间号', state.W / 2, py + 46, 16, C.dim, 'center');
-    txt(ctx, String(S.room || ''), state.W / 2, py + 96, 44, C.gold, 'center', 600);
-    txt(ctx, '把房号发给朋友，或用链接 ?room=房号 进入', state.W / 2, py + 132, 14, C.dim);
+    txt(ctx, '房间号', state.W / 2, py + 40, 16, C.dim, 'center');
+    txt(ctx, String(S.room || ''), state.W / 2, py + 88, 44, C.gold, 'center', 600);
+    txt(ctx, '发房卡给朋友，点开就进房；也可以直接报房号', state.W / 2, py + 120, 14, C.dim);
+
+    // 复制房号 / 邀请好友：微信分享卡片带 room=房号，朋友点开自动进房
+    var topW = 118, topH = 32, topY = py + 136;
+    var topX = state.W / 2 - topW - 8;
+    box(ctx, topX, topY, topW, topH, 16, C.btn, C.panelLine);
+    txt(ctx, '复制房号', topX + topW / 2, topY + topH / 2, 13, C.text, 'center');
+    hits.push({ x: topX, y: topY, w: topW, h: topH, act: 'netCopyRoom' });
+    var topX2 = state.W / 2 + 8;
+    box(ctx, topX2, topY, topW, topH, 16, 'rgba(216,179,106,0.18)', C.gold);
+    txt(ctx, '邀请好友', topX2 + topW / 2, topY + topH / 2, 13, C.gold, 'center', 600);
+    hits.push({ x: topX2, y: topY, w: topW, h: topH, act: 'netShareRoom' });
 
     var RC2 = S.roomCfg || {};
     var tierTxt = { heavy: '重贡 4/2', light: '轻贡 2/1', off: '不进贡' };
     var hintTxt = { none: '不提示', reveal: '出牌后提示', always: '常显' };
     txt(ctx, (S.rounds || 8) + ' 局 · ' + (tierTxt[RC2.tributeTier] || '重贡') +
       ' · 每步 ' + (RC2.turnSeconds || 20) + ' 秒 · 队友' + (hintTxt[RC2.teamHint] || '不提示'),
-      state.W / 2, py + 154, 13, C.gold, 'center');
+      state.W / 2, py + 176, 13, C.gold, 'center');
 
     (S.seats || []).forEach(function (s, i) {
-      var y = py + 178 + i * 56;
-      box(ctx, px + 40, y, pw - 80, 54, 10, 'rgba(10,20,34,0.6)',
+      var y = py + 198 + i * 54;
+      box(ctx, px + 40, y, pw - 80, 52, 10, 'rgba(10,20,34,0.6)',
         s.isYou ? C.gold : 'rgba(216,179,106,0.18)');
-      txt(ctx, (s.isYou ? '你 · ' : '') + s.name, px + 62, y + 32, 18, C.text, 'left');
+      txt(ctx, (s.isYou ? '你 · ' : '') + s.name, px + 62, y + 31, 18, C.text, 'left');
       var right = s.ai ? '机器人' : s.online ? (s.ready ? '已准备' : '未准备') : '空位';
-      txt(ctx, right, px + pw - 62, y + 32, 15,
+      txt(ctx, right, px + pw - (S.isHost && !s.isYou && s.online && !s.ai ? 120 : 62), y + 31, 15,
         s.ready || s.ai ? C.gold : C.dim, 'right');
+      if (S.isHost && !s.isYou && s.online && !s.ai) {
+        box(ctx, px + pw - 108, y + 9, 50, 34, 8, 'rgba(140,47,42,0.9)', 'rgba(255,210,180,0.5)');
+        txt(ctx, '移除', px + pw - 83, y + 26, 12, '#ffe9dd', 'center', 600);
+        hits.push({ x: px + pw - 108, y: y + 9, w: 50, h: 34, act: 'netKick', rel: i });
+      }
     });
 
     var bw = 260, bh = 62;
     // 昵称 / 发言：头像行下方一排放两个胶囊，朋友圈式操作，不挤占席位列表
     var nick = S.myName || '玩家';
-    var chipW = 200, chipH = 44, chipY = py + 412;
+    var chipW = 200, chipH = 44, chipY = py + 424;
     var cx0 = state.W / 2 - chipW - 10;
     box(ctx, cx0, chipY, chipW, chipH, 22, C.btn, C.panelLine);
     txt(ctx, '改名 · ' + nick, cx0 + chipW / 2, chipY + chipH / 2, 15, C.text, 'center');
@@ -574,6 +590,15 @@ module.exports = function (B) {
     return rel === 0 ? '你' : nm;
   }
 
+  function chatLine(S, c) {
+    if (c.kind === 'prop') {
+      var icon = (S.chatProps || {})[c.prop] || '🎁';
+      var label = { egg: '蛋', tomato: '西红柿', flower: '花' }[c.prop] || '道具';
+      return chatName(S, c.rel) + ' → ' + chatName(S, c.target) + '  ' + icon + label;
+    }
+    return chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text;
+  }
+
   function chatPanel(ctx, S, L, hits) {
     if (!S.chatOpen) return;
     // 常驻右侧的轻量发言浮层：不铺全屏、不压手牌/操作条，打开时仍可继续出牌
@@ -605,30 +630,32 @@ module.exports = function (B) {
       txt(ctx, '还没人说话', px + 14, py + 48, 12, C.dim, 'left');
     } else {
       msgs.forEach(function (c, i) {
-        var line = chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text;
+        var line = chatLine(S, c);
         txt(ctx, line, px + 14, py + 42 + i * 15, 11, c.rel === 0 ? C.gold : C.text, 'left');
       });
     }
     ctx.restore();
 
-    // 表情 / 短语页签：小面板只展示一页，避免把 16 个表情全摊开压住牌桌
-    var tabW = Math.round((pw - 28 - 8) / 2), tabH = 26, tabY = py + 70;
-    box(ctx, px + 14, tabY, tabW, tabH, 8,
-      (S.chatTab || 'emoji') === 'emoji' ? 'rgba(216,179,106,0.18)' : C.btn,
-      (S.chatTab || 'emoji') === 'emoji' ? C.gold : C.panelLine);
-    txt(ctx, '表情', px + 14 + tabW / 2, tabY + tabH / 2, 12,
-      (S.chatTab || 'emoji') === 'emoji' ? C.gold : C.text, 'center', 600);
-    hits.push({ x: px + 14, y: tabY, w: tabW, h: tabH, act: 'chatTabEmoji' });
-
-    box(ctx, px + 14 + tabW + 8, tabY, tabW, tabH, 8,
-      (S.chatTab || 'emoji') === 'phrase' ? 'rgba(216,179,106,0.18)' : C.btn,
-      (S.chatTab || 'emoji') === 'phrase' ? C.gold : C.panelLine);
-    txt(ctx, '短语', px + 14 + tabW + 8 + tabW / 2, tabY + tabH / 2, 12,
-      (S.chatTab || 'emoji') === 'phrase' ? C.gold : C.text, 'center', 600);
-    hits.push({ x: px + 14 + tabW + 8, y: tabY, w: tabW, h: tabH, act: 'chatTabPhrase' });
+    // 表情 / 短语 / 道具页签：小面板只展示一页，避免把 16 个表情全摊开压住牌桌
+    var tabGap = 6, tabW = Math.round((pw - 28 - tabGap * 2) / 3), tabH = 26, tabY = py + 70;
+    var tabs = [
+      { key: 'emoji', label: '表情', act: 'chatTabEmoji' },
+      { key: 'phrase', label: '短语', act: 'chatTabPhrase' },
+      { key: 'prop', label: '道具', act: 'chatTabProp' }
+    ];
+    tabs.forEach(function (t, i) {
+      var tx = px + 14 + i * (tabW + tabGap);
+      box(ctx, tx, tabY, tabW, tabH, 8,
+        (S.chatTab || 'emoji') === t.key ? 'rgba(216,179,106,0.18)' : C.btn,
+        (S.chatTab || 'emoji') === t.key ? C.gold : C.panelLine);
+      txt(ctx, t.label, tx + tabW / 2, tabY + tabH / 2, 12,
+        (S.chatTab || 'emoji') === t.key ? C.gold : C.text, 'center', 600);
+      hits.push({ x: tx, y: tabY, w: tabW, h: tabH, act: t.act });
+    });
 
     var gridY = py + 102;
-    if ((S.chatTab || 'emoji') === 'emoji') {
+    var tabNow = S.chatTab || 'emoji';
+    if (tabNow === 'emoji') {
       var ec = (S.chatEmoji || []).slice(0, 16);
       var cols = 4, cellW = (pw - 28 - 18) / 4, cellH = 30, gap = 6;
       ec.forEach(function (e, i) {
@@ -638,7 +665,7 @@ module.exports = function (B) {
         txt(ctx, e, x + cellW / 2, y + cellH / 2, 19, C.text, 'center');
         hits.push({ x: x, y: y, w: cellW, h: cellH, act: 'chatEmoji', text: e });
       });
-    } else {
+    } else if (tabNow === 'phrase') {
       var phs = (S.chatPhrases || []).slice(0, 8);
       var cols2 = 2, cellW2 = (pw - 28 - 6) / 2, cellH2 = 30, gap2 = 6;
       phs.forEach(function (p, i) {
@@ -648,6 +675,33 @@ module.exports = function (B) {
         txt(ctx, p, x + cellW2 / 2, y + cellH2 / 2, 13, C.text, 'center');
         hits.push({ x: x, y: y, w: cellW2, h: cellH2, act: 'chatText', text: p });
       });
+    } else {
+      // 目标：相对座位 1..3，不能砸自己；按钮直接发送，不设冷却
+      var tgt = S.chatTarget || 1;
+      var tW = (pw - 28 - 12) / 3, tGap = 6;
+      for (var ti = 1; ti <= 3; ti++) {
+        var tx2 = px + 14 + (ti - 1) * (tW + tGap);
+        box(ctx, tx2, gridY, tW, 28, 8,
+          tgt === ti ? 'rgba(216,179,106,0.18)' : C.btn,
+          tgt === ti ? C.gold : C.panelLine);
+        txt(ctx, chatName(S, ti), tx2 + tW / 2, gridY + 14, 12,
+          tgt === ti ? C.gold : C.text, 'center', 600);
+        hits.push({ x: tx2, y: gridY, w: tW, h: 28, act: 'chatTarget', rel: ti });
+      }
+      var props = [
+        { key: 'egg', icon: '🥚', label: '砸蛋' },
+        { key: 'tomato', icon: '🍅', label: '西红柿' },
+        { key: 'flower', icon: '💐', label: '送花' }
+      ];
+      var pW = (pw - 28 - 12) / 3, pGap = 6;
+      props.forEach(function (p, i) {
+        var x = px + 14 + i * (pW + pGap), y = gridY + 38;
+        box(ctx, x, y, pW, 62, 10, C.btn, C.panelLine);
+        txt(ctx, p.icon, x + pW / 2, y + 24, 24, C.text, 'center');
+        txt(ctx, p.label, x + pW / 2, y + 49, 12, C.gold, 'center', 600);
+        hits.push({ x: x, y: y, w: pW, h: 62, act: 'chatProp', prop: p.key });
+      });
+      txt(ctx, '点一下直接发出 · 不设冷却', px + 14, gridY + 118, 11, C.dim, 'left');
     }
 
     // 打字入口固定在小面板底部
@@ -664,7 +718,7 @@ module.exports = function (B) {
     var live = (S.chats || []).filter(function (c) { return now - (c.ts || 0) < 8000; }).slice(-3);
     if (!live.length) return;
     live.forEach(function (c, i) {
-      var txtS = chatName(S, c.rel) + (c.kind === 'emoji' ? ' ' : '：') + c.text;
+      var txtS = chatLine(S, c);
       ctx.save();
       ctx.font = '400 ' + (c.kind === 'emoji' ? 16 : 13) + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
       var tw = Math.min(300, Math.round(ctx.measureText(txtS).width) + 24);
@@ -937,21 +991,25 @@ module.exports = function (B) {
     overlay(ctx, H, state.W, H);
     box(ctx, px, py, pw, ph, 16, C.panel, C.panelLine);
     var ex = S.ask.kind === 'dissolve';
-    txt(ctx, ex ? '解散房间？' : '退出本局？', state.W / 2, py + 56, 24, C.gold, 'center', 600);
-    var sub = ex
+    var kick = S.ask.kind === 'kick';
+    var warn = ex || kick;
+    txt(ctx, kick ? '移出这位玩家？' : ex ? '解散房间？' : '退出本局？', state.W / 2, py + 56, 24, C.gold, 'center', 600);
+    var sub = kick
+      ? '该玩家会回到联机大厅，房间继续；对局中不能移人'
+      : ex
       ? '房间会关闭：你回主界面，其他人回联机大厅'
       : (S.mode === 'online'
         ? '你的座位转机器人托管，房间不解散；要散桌请用「解散房间」'
         : '本局进度不保存，回到主界面');
     txt(ctx, sub, state.W / 2, py + 100, 14, C.dim, 'center');
-    if (S.mode === 'online' && !ex) {
+    if (S.mode === 'online' && !warn) {
       txt(ctx, '有人在线时房间会继续', state.W / 2, py + 128, 13, C.dim, 'center');
     }
 
     var bw = 220, bh = 60, by = py + ph - 96;
-    box(ctx, state.W / 2 - bw - 10, by, bw, bh, 12, ex ? 'rgba(140,47,42,0.92)' : C.gold, null);
-    txt(ctx, ex ? '解散' : '退出', state.W / 2 - bw / 2 - 10, by + bh / 2, 18,
-      ex ? '#ffe9dd' : '#101f33', 'center', 600);
+    box(ctx, state.W / 2 - bw - 10, by, bw, bh, 12, warn ? 'rgba(140,47,42,0.92)' : C.gold, null);
+    txt(ctx, kick ? '移出' : ex ? '解散' : '退出', state.W / 2 - bw / 2 - 10, by + bh / 2, 18,
+      warn ? '#ffe9dd' : '#101f33', 'center', 600);
     hits.push({ x: state.W / 2 - bw - 10, y: by, w: bw, h: bh, act: 'askYes' });
 
     box(ctx, state.W / 2 + 10, by, bw, bh, 12, C.btn, C.panelLine);

@@ -623,6 +623,49 @@ module.exports = function () {
     if (k && k !== 'single' && label !== k) banner(ctx, label, p, L);
   }
 
+  function drawPropEmoji(ctx, prop, x, y, size, alpha) {
+    var icon = { egg: '🥚', tomato: '🍅', flower: '💐' }[prop] || '🎁';
+    ctx.save();
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    ctx.font = size + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = 12;
+    ctx.fillText(icon, x, y);
+    ctx.restore();
+  }
+
+  // 房内道具：从发送者座位沿抛物线飞向目标座位（不设冷却，最近一次飞行即可）
+  function propFx(ctx, S, L) {
+    var fx = S.propFx;
+    if (!fx) return;
+    var p = (Date.now() - fx.t0) / 820;
+    if (p < 0 || p >= 1) return;
+    var from = (typeof fx.from === 'number' && fx.from >= 0 && fx.from <= 3) ? fx.from : 0;
+    var target = (typeof fx.target === 'number' && fx.target >= 0 && fx.target <= 3) ? fx.target : 2;
+    var a = L.seats[SEAT_POS[from]], b = L.seats[SEAT_POS[target]];
+    var x0 = a.x + a.w / 2, y0 = a.y + a.h / 2;
+    var x1 = b.x + b.w / 2, y1 = b.y + b.h / 2;
+    var mx = (x0 + x1) / 2;
+    var my = Math.min(y0, y1) - Math.max(80, Math.abs(x1 - x0) * 0.22);
+    var e = easeOut(p);
+    var x = (1 - e) * (1 - e) * x0 + 2 * (1 - e) * e * mx + e * e * x1;
+    var y = (1 - e) * (1 - e) * y0 + 2 * (1 - e) * e * my + e * e * y1;
+    // 飞行尾迹，让快速连发也能看清方向
+    for (var i = 1; i <= 3; i++) {
+      var q = Math.max(0, e - i * 0.08);
+      var tx = (1 - q) * (1 - q) * x0 + 2 * (1 - q) * q * mx + q * q * x1;
+      var ty = (1 - q) * (1 - q) * y0 + 2 * (1 - q) * q * my + q * q * y1;
+      drawPropEmoji(ctx, fx.prop, tx, ty, 16, 0.22 * (1 - p));
+    }
+    drawPropEmoji(ctx, fx.prop, x, y, 34 + 8 * Math.sin(p * Math.PI), 1);
+    if (p > 0.72) {
+      var alpha = Math.max(0, (1 - p) / 0.28);
+      drawPropEmoji(ctx, fx.prop, x1, y1 - 16, 20, alpha);
+    }
+  }
+
   function fxOverlay(ctx, S, L, H) {
     if (S.fxDemoP !== undefined && S.fxDemoP !== null) {
       var dp = S.fxDemoP;
@@ -649,6 +692,7 @@ module.exports = function () {
     if (S.fxForce !== undefined && S.fxForce !== null) return;
     if (!S.fx) return;
     var now = Date.now();
+    propFx(ctx, S, L);
 
     if (S.fx.playT0) {
       var pk = (now - S.fx.playT0) / 640;
